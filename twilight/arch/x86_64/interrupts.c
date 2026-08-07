@@ -23,6 +23,7 @@ static struct idt_entry idt[256];
 static uint16_t kernel_cs;
 
 extern void default_interrupt_stub(void);
+extern void irq0_stub(void);
 extern void irq1_stub(void);
 extern void *exception_stub_table[32];
 
@@ -40,18 +41,16 @@ static void idt_set_gate(uint8_t vector, void (*handler)(void)) {
 void idt_init(void) {
     __asm__ volatile ("mov %%cs, %0" : "=r"(kernel_cs));
 
-    /* Every vector is valid before interrupts are enabled. */
     for (size_t i = 0; i < 256; ++i) {
         idt_set_gate((uint8_t)i, default_interrupt_stub);
     }
 
-    /* CPU exceptions 0..31 get vector-aware panic stubs. */
     for (size_t i = 0; i < 32; ++i) {
         idt_set_gate((uint8_t)i, (void (*)(void))exception_stub_table[i]);
     }
 
-    /* PIC IRQ1 (keyboard) after remapping the master PIC to 0x20. */
-    idt_set_gate(0x21, irq1_stub);
+    idt_set_gate(0x20, irq0_stub); /* PIT */
+    idt_set_gate(0x21, irq1_stub); /* PS/2 keyboard */
 
     const struct idtr descriptor = {
         .limit = (uint16_t)(sizeof(idt) - 1),
@@ -70,7 +69,7 @@ void pic_init(void) {
     outb(0x21, 0x01); io_wait();
     outb(0xa1, 0x01); io_wait();
 
-    outb(0x21, 0xfdu); /* unmask IRQ1 only */
+    outb(0x21, 0xfcu); /* unmask IRQ0 + IRQ1 */
     outb(0xa1, 0xffu);
 }
 
