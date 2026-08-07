@@ -27,6 +27,14 @@ SECTIONS {
     .rodata : {
         *(.rodata .rodata.*)
         . = ALIGN(8);
+        __twilight_initcalls_start = .;
+        KEEP(*(.twilight_initcalls))
+        __twilight_initcalls_end = .;
+        . = ALIGN(8);
+        __twilight_exitcalls_start = .;
+        KEEP(*(.twilight_exitcalls))
+        __twilight_exitcalls_end = .;
+        . = ALIGN(8);
         __twilight_pci_drivers_start = .;
         KEEP(*(.twilight_pci_drivers))
         __twilight_pci_drivers_end = .;
