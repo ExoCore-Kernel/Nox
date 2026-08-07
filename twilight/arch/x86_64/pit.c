@@ -26,6 +26,14 @@ void pit_init(uint32_t requested_hz) {
     outb(PIT_CHANNEL0, (uint8_t)((divisor >> 8) & 0xffu));
 }
 
+uint16_t pit_read_counter(void) {
+    /* Latch channel 0's current count, then read low byte followed by high. */
+    outb(PIT_COMMAND, 0x00u);
+    const uint8_t lo = inb(PIT_CHANNEL0);
+    const uint8_t hi = inb(PIT_CHANNEL0);
+    return (uint16_t)((uint16_t)lo | ((uint16_t)hi << 8));
+}
+
 void pit_irq_handler(void) {
     ++ticks;
     pic_send_eoi(0);
