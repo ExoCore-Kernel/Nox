@@ -1,6 +1,8 @@
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <twilight/apic.h>
 #include <twilight/interrupts.h>
 #include <twilight/io.h>
 
@@ -87,17 +89,40 @@ void pic_unmask_irq(uint8_t irq) {
     outb(port, (uint8_t)(mask & (uint8_t)~(1u << bit)));
 }
 
+uint8_t pic_master_mask(void) {
+    return inb(0x21u);
+}
+
+uint8_t pic_master_irr(void) {
+    outb(0x20u, 0x0au); /* OCW3: read Interrupt Request Register */
+    io_wait();
+    return inb(0x20u);
+}
+
+uint8_t pic_master_isr(void) {
+    outb(0x20u, 0x0bu); /* OCW3: read In-Service Register */
+    io_wait();
+    return inb(0x20u);
+}
+
 void pic_send_eoi(uint8_t irq) {
     if (irq >= 8) {
         outb(0xa0, 0x20);
     }
     outb(0x20, 0x20);
+    apic_eoi_if_needed();
 }
 
 void interrupts_enable(void) {
-    __asm__ volatile ("sti");
+    __asm__ volatile ("sti" ::: "memory");
 }
 
 void interrupts_disable(void) {
-    __asm__ volatile ("cli");
+    __asm__ volatile ("cli" ::: "memory");
+}
+
+bool interrupts_are_enabled(void) {
+    uint64_t flags;
+    __asm__ volatile ("pushfq; popq %0" : "=r"(flags));
+    return (flags & (1ull << 9)) != 0;
 }
