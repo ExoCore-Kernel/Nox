@@ -18,7 +18,10 @@ irq1_stub:
     pushq %r14
     pushq %r15
 
+    movq %rsp, %r15
+    andq $-16, %rsp
     call keyboard_irq_handler
+    movq %r15, %rsp
 
     popq %r15
     popq %r14
