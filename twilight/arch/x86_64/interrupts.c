@@ -22,6 +22,7 @@ struct idtr {
 static struct idt_entry idt[256];
 static uint16_t kernel_cs;
 
+extern void default_interrupt_stub(void);
 extern void irq1_stub(void);
 
 static void idt_set_gate(uint8_t vector, void (*handler)(void)) {
@@ -38,10 +39,16 @@ static void idt_set_gate(uint8_t vector, void (*handler)(void)) {
 void idt_init(void) {
     __asm__ volatile ("mov %%cs, %0" : "=r"(kernel_cs));
 
+    /*
+     * Install a valid handler for every vector first. This way any unexpected
+     * CPU exception, NMI, or stray IRQ stops in a controlled halt instead of
+     * entering an empty gate and cascading into a double/triple fault.
+     */
     for (size_t i = 0; i < 256; ++i) {
-        idt[i] = (struct idt_entry){0};
+        idt_set_gate((uint8_t)i, default_interrupt_stub);
     }
 
+    /* PIC IRQ1 (keyboard) after remapping the master PIC to 0x20. */
     idt_set_gate(0x21, irq1_stub);
 
     const struct idtr descriptor = {
