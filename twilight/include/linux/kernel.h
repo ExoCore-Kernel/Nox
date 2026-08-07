@@ -3,6 +3,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <linux/string.h>
+#include <linux/types.h>
+
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define BIT(nr) (1ull << (nr))
 #define BIT_ULL(nr) (1ull << (nr))
@@ -29,3 +32,39 @@
 } while (0)
 
 #define barrier() __asm__ volatile ("" ::: "memory")
+
+#define ERR_PTR(error) ((void *)(intptr_t)(error))
+#define PTR_ERR(pointer) ((long)(intptr_t)(pointer))
+#define IS_ERR(pointer) ((uintptr_t)(pointer) >= (uintptr_t)-4095)
+#define IS_ERR_OR_NULL(pointer) ((pointer) == 0 || IS_ERR(pointer))
+
+static inline u16 __twilight_bswap16(u16 value) {
+    return (u16)((value << 8) | (value >> 8));
+}
+static inline u32 __twilight_bswap32(u32 value) {
+    return __builtin_bswap32(value);
+}
+
+/* Twilight's current x86_64 target is little-endian. */
+#define cpu_to_le16(value) ((u16)(value))
+#define le16_to_cpu(value) ((u16)(value))
+#define cpu_to_le32(value) ((u32)(value))
+#define le32_to_cpu(value) ((u32)(value))
+#define cpu_to_le64(value) ((u64)(value))
+#define le64_to_cpu(value) ((u64)(value))
+#define cpu_to_be16(value) __twilight_bswap16((u16)(value))
+#define be16_to_cpu(value) __twilight_bswap16((u16)(value))
+#define cpu_to_be32(value) __twilight_bswap32((u32)(value))
+#define be32_to_cpu(value) __twilight_bswap32((u32)(value))
+
+static inline char *print_mac(char *buffer, const u8 *address) {
+    static const char hex[] = "0123456789abcdef";
+    if (buffer == 0 || address == 0) return buffer;
+    for (unsigned int i = 0; i < 6u; ++i) {
+        buffer[i * 3u] = hex[(address[i] >> 4) & 0xfu];
+        buffer[i * 3u + 1u] = hex[address[i] & 0xfu];
+        if (i != 5u) buffer[i * 3u + 2u] = ':';
+    }
+    buffer[17] = '\0';
+    return buffer;
+}
