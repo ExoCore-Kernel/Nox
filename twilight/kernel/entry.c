@@ -14,6 +14,7 @@
 #include <twilight/serial.h>
 #include <twilight/timer.h>
 #include <twilight/version.h>
+#include <twilight/vmm.h>
 
 #ifndef TWILIGHT_PANIC_SELF_TEST
 #define TWILIGHT_PANIC_SELF_TEST 0
@@ -25,6 +26,10 @@
 
 #ifndef TWILIGHT_PMM_SELF_TEST
 #define TWILIGHT_PMM_SELF_TEST 1
+#endif
+
+#ifndef TWILIGHT_VMM_SELF_TEST
+#define TWILIGHT_VMM_SELF_TEST 1
 #endif
 
 __attribute__((used, section(".limine_requests_start")))
@@ -291,6 +296,26 @@ void kmain(void) {
     }
     trace("PMM self-test passed");
     klog("PMM self-test passed: page, aligned DMA32 run, free and double-free guard");
+#endif
+
+    trace("initializing virtual memory manager");
+    if (!vmm_init()) {
+        kernel_panic("x86_64 virtual memory manager initialization failed");
+    }
+    trace("virtual memory manager initialized");
+    if (vmm_nx_supported()) {
+        klog("x86_64 VMM initialized: 4-level paging, NX enabled");
+    } else {
+        klog("x86_64 VMM initialized: 4-level paging, NX unavailable");
+    }
+
+#if TWILIGHT_VMM_SELF_TEST
+    trace("running VMM self-test");
+    if (!vmm_self_test()) {
+        kernel_panic("Virtual memory manager self-test failed");
+    }
+    trace("VMM self-test passed");
+    klog("VMM self-test passed: map, translate, protect, unmap and address-space clone");
 #endif
 
 #if TWILIGHT_PANIC_SELF_TEST
