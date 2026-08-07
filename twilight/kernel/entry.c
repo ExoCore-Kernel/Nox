@@ -17,6 +17,7 @@
 #include <twilight/mmio.h>
 #include <twilight/panic.h>
 #include <twilight/pmm.h>
+#include <twilight/security.h>
 #include <twilight/serial.h>
 #include <twilight/timer.h>
 #include <twilight/tpm.h>
@@ -135,11 +136,6 @@ static void spin_pause(uint64_t iterations) {
 }
 
 static bool wait_for_first_pit_irq(void) {
-    /*
-     * Do not HLT while diagnosing initial interrupt delivery: if routing is
-     * broken, HLT would sleep forever. A bounded PAUSE loop lets serial report
-     * the PIC/PIT state and lets Twilight try the virtual-wire fallback.
-     */
     for (uint64_t i = 0; i < 10000000ull; ++i) {
         if (timer_ticks() != 0) return true;
         __asm__ volatile ("pause");
@@ -240,10 +236,10 @@ static void initialize_acpi(void) {
 }
 
 static void initialize_tpm_security(void) {
-    trace("probing TPM 2.0 security");
+    trace("probing TPM 2.0 Root of Trust");
     if (!tpm_init()) {
         trace("TPM initialization returned failure");
-        klog("TPM 2.0 initialization failed; TPM-backed kernel vault unavailable");
+        klog("TPM initialization failed, unable to establish Root of Trust. Security may be impacted.");
         return;
     }
 
@@ -251,8 +247,8 @@ static void initialize_tpm_security(void) {
     tpm_get_status(&tpm);
 
     if (!tpm.detected) {
-        trace("TPM 2.0 not detected");
-        klog("TPM 2.0 not detected; TPM-backed kernel vault unavailable");
+        trace("TPM chip not detected; Root of Trust unavailable");
+        klog("TPM chip not detected, unable to establish Root of Trust. Security may be impacted.");
         return;
     }
 
@@ -261,35 +257,44 @@ static void initialize_tpm_security(void) {
 
     if (!tpm.transport_ready) {
         const char *parts[] = {
-            "TPM 2.0 detected (ACPI start method ", start_method,
-            "), but a supported CRB transport is unavailable"
+            "TPM chip detected (ACPI start method ", start_method,
+            "), but no supported TPM 2.0 CRB transport is usable; unable to establish Root of Trust. Security may be impacted."
         };
         klog_parts(parts, sizeof(parts) / sizeof(parts[0]));
-        trace("TPM detected but CRB transport unavailable");
+        trace("TPM detected but Root of Trust transport unavailable");
         return;
     }
 
-    klog("TPM 2.0 CRB transport ready");
-
-    if (!tpm.vault_ready) {
+    klog("TPM 2.0 CRB transport ready; measuring Twilight security state");
+    trace("extending Twilight measurements and creating PCR policy");
+    if (!security_establish_tpm_root_of_trust()) {
+        tpm_get_status(&tpm);
         char response_code[32];
         u64_to_decimal(tpm.last_response_code, response_code);
         const char *parts[] = {
-            "TPM transport works, but TPM-resident AES vault creation failed; response code ",
-            response_code
+            "TPM chip detected, but unable to establish cryptographic Root of Trust; TPM response code ",
+            response_code, ". Security may be impacted."
         };
         klog_parts(parts, sizeof(parts) / sizeof(parts[0]));
-        trace("TPM AES vault unavailable");
+        trace("TPM Root of Trust establishment failed");
         return;
     }
 
-    trace("running TPM kernel vault self-test");
-    if (!tpm_vault_self_test()) {
-        kernel_panic("TPM-backed kernel vault self-test failed");
+    tpm_get_status(&tpm);
+    if (!tpm.root_of_trust_established || !tpm.pcr_policy_bound || !tpm.vault_ready) {
+        kernel_panic("TPM reported incomplete Root of Trust after establishment");
     }
-    trace("TPM kernel vault self-test passed");
-    klog("TPM-backed per-boot kernel vault active: AES key remains inside TPM");
-    klog("TPM vault v1 provides confidentiality; persistent PCR sealing and authentication are not enabled yet");
+
+    trace("running authenticated TPM Root of Trust vault self-test");
+    if (!tpm_vault_self_test()) {
+        kernel_panic("Established TPM Root of Trust failed authenticated vault self-test");
+    }
+
+    trace("TPM Root of Trust self-test passed");
+    klog("TPM Root of Trust established: PCR 7 firmware policy + PCR 11 Twilight kernel + PCR 12 security policy");
+    klog("TPM kernel vault active: PCR-bound AES-128-CFB + HMAC-SHA256 keys remain inside TPM");
+    klog("TPM policy is fail-closed: changing the bound PCR state revokes access to protected kernel secrets");
+    klog("Verified-boot boundary: firmware/bootloader must authenticate Twilight before kmain; TPM anchors measured state and kernel secrets from this point onward");
 }
 
 #if TWILIGHT_SCROLL_SELF_TEST
@@ -376,53 +381,38 @@ void kmain(void) {
 
 #if TWILIGHT_PMM_SELF_TEST
     trace("running PMM self-test");
-    if (!pmm_self_test()) {
-        kernel_panic("Physical memory manager self-test failed");
-    }
+    if (!pmm_self_test()) kernel_panic("Physical memory manager self-test failed");
     trace("PMM self-test passed");
     klog("PMM self-test passed: page, aligned DMA32 run, free and double-free guard");
 #endif
 
     trace("initializing virtual memory manager");
-    if (!vmm_init()) {
-        kernel_panic("x86_64 virtual memory manager initialization failed");
-    }
+    if (!vmm_init()) kernel_panic("x86_64 virtual memory manager initialization failed");
     trace("virtual memory manager initialized");
-    if (vmm_nx_supported()) {
-        klog("x86_64 VMM initialized: 4-level paging, NX enabled");
-    } else {
-        klog("x86_64 VMM initialized: 4-level paging, NX unavailable");
-    }
+    if (vmm_nx_supported()) klog("x86_64 VMM initialized: 4-level paging, NX enabled");
+    else klog("x86_64 VMM initialized: 4-level paging, NX unavailable");
 
 #if TWILIGHT_VMM_SELF_TEST
     trace("running VMM self-test");
-    if (!vmm_self_test()) {
-        kernel_panic("Virtual memory manager self-test failed");
-    }
+    if (!vmm_self_test()) kernel_panic("Virtual memory manager self-test failed");
     trace("VMM self-test passed");
     klog("VMM self-test passed: map, translate, protect, unmap and address-space clone");
 #endif
 
     trace("initializing kernel heap");
-    if (!heap_init()) {
-        kernel_panic("Kernel heap initialization failed");
-    }
+    if (!heap_init()) kernel_panic("Kernel heap initialization failed");
     trace("kernel heap initialized");
     log_heap_stats();
 
 #if TWILIGHT_HEAP_SELF_TEST
     trace("running kernel heap self-test");
-    if (!heap_self_test()) {
-        kernel_panic("Kernel heap self-test failed");
-    }
+    if (!heap_self_test()) kernel_panic("Kernel heap self-test failed");
     trace("kernel heap self-test passed");
     klog("Heap self-test passed: slab, calloc, realloc, large pages and leak checks");
 #endif
 
     trace("initializing MMIO mapper");
-    if (!mmio_init()) {
-        kernel_panic("Kernel MMIO mapper initialization failed");
-    }
+    if (!mmio_init()) kernel_panic("Kernel MMIO mapper initialization failed");
     trace("MMIO mapper initialized");
     klog("MMIO mapper initialized for cache-disabled device mappings");
 
@@ -430,17 +420,13 @@ void kmain(void) {
 
 #if TWILIGHT_LINUX_COMPAT_SELF_TEST
     trace("running Linux compatibility self-test");
-    if (!linux_compat_self_test()) {
-        kernel_panic("Linux compatibility layer self-test failed");
-    }
+    if (!linux_compat_self_test()) kernel_panic("Linux compatibility layer self-test failed");
     trace("Linux compatibility self-test passed");
     klog("Linux compatibility layer ready: types, list, slab, printk and MMIO basics");
 #endif
 
     trace("initializing x86_64 GDT and TSS");
-    if (!gdt_init()) {
-        kernel_panic("x86_64 GDT/TSS initialization failed");
-    }
+    if (!gdt_init()) kernel_panic("x86_64 GDT/TSS initialization failed");
     trace("GDT and TSS initialized");
     klog("x86_64 GDT/TSS initialized: ring 0 and ring 3 segments ready");
 
@@ -454,9 +440,7 @@ void kmain(void) {
 
 #if TWILIGHT_USERMODE_SELF_TEST
     trace("entering ring 3 self-test");
-    if (!user_mode_self_test()) {
-        kernel_panic("Ring 3 privilege transition self-test failed");
-    }
+    if (!user_mode_self_test()) kernel_panic("Ring 3 privilege transition self-test failed");
     trace("ring 3 self-test passed");
     klog("Ring 3 transition passed: CPL3 -> int80 -> CPL0 -> CPL3 -> kernel");
 #endif
@@ -473,28 +457,20 @@ void kmain(void) {
     trace("8259 PIC initialized");
     klog("8259 PIC initialized; IRQ0 unmasked, IRQ1 masked");
 
-    /* Prove the IDT gate, assembly stub and C IRQ0 handler before hardware IRQs. */
     trace("testing IRQ0 vector with software INT 0x20");
     __asm__ volatile ("int $0x20");
-    if (timer_ticks() != 1) {
-        fatal_halt("software IRQ0 vector test did not reach PIT handler");
-    }
+    if (timer_ticks() != 1) fatal_halt("software IRQ0 vector test did not reach PIT handler");
     trace("software IRQ0 vector test passed");
 
-    /* pit_init() resets the diagnostic software tick back to zero. */
     pit_init(1000u);
     trace("PIT configured");
     klog("PIT configured for 1000 Hz uptime clock");
 
-    /* Let the PIT run while IF=0 so a real IRQ0 should latch in the PIC IRR. */
     const uint16_t pit_before = pit_read_counter();
     spin_pause(250000u);
     const uint16_t pit_after = pit_read_counter();
-    if (pit_before == pit_after) {
-        trace("warning: PIT counter did not change during pre-STI probe");
-    } else {
-        trace("PIT counter is running before interrupts are enabled");
-    }
+    if (pit_before == pit_after) trace("warning: PIT counter did not change during pre-STI probe");
+    else trace("PIT counter is running before interrupts are enabled");
     trace_irq_state("before STI");
 
     interrupts_enable();
@@ -509,7 +485,6 @@ void kmain(void) {
             fatal_halt("could not configure Local APIC virtual-wire fallback");
         }
 
-        /* Start from a clean PIC/PIT state after changing the chipset route. */
         pic_init();
         pit_init(1000u);
         trace_irq_state("virtual-wire configured before STI");
@@ -525,13 +500,12 @@ void kmain(void) {
     }
 
     trace("first hardware PIT IRQ0 received");
-
     klog_enable_uptime();
     klog("PIT IRQ0 active; uptime clock running");
     klog_heartbeat_enable();
 
-    /* TPM CRB command timeouts use the PIT clock, so probe only after IRQ0 is
-     * confirmed alive. Absence/unsupported transport is intentionally nonfatal. */
+    /* TPM CRB command timeouts use the PIT clock. Establish the hardware trust
+     * anchor before normal device use or future user processes begin. */
     initialize_tpm_security();
 
 #if TWILIGHT_SCROLL_SELF_TEST
