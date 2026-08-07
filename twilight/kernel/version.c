@@ -1,6 +1,7 @@
 #include <stddef.h>
 
 #include <twilight/log.h>
+#include <twilight/serial.h>
 #include <twilight/version.h>
 
 static char os_name_buffer[64] = "Unknown";
@@ -39,19 +40,20 @@ void twilight_print_version_banner(const char *os_name) {
     };
     klog_parts(line1, sizeof(line1) / sizeof(line1[0]));
 
-    const char *line2[] = {
-        "Twilight Kernel Version ",
-        TWILIGHT_VERSION,
-        ": ",
-        twilight_build_date,
-        "; ",
-        twilight_build_user,
-        ":",
-        twilight_build_id,
-        "/",
-        TWILIGHT_RELEASE,
-        " ",
-        TWILIGHT_ARCH,
-    };
-    klog_parts(line2, sizeof(line2) / sizeof(line2[0]));
+    /* Keep framebuffer boot unblocked while the long metadata line is debugged. */
+    klog("Twilight Kernel Version " TWILIGHT_VERSION);
+
+    serial_write("[serial] full build metadata: Twilight Kernel Version ");
+    serial_write(TWILIGHT_VERSION);
+    serial_write(": ");
+    serial_write(twilight_build_date);
+    serial_write("; ");
+    serial_write(twilight_build_user);
+    serial_write(":");
+    serial_write(twilight_build_id);
+    serial_write("/");
+    serial_write(TWILIGHT_RELEASE);
+    serial_write(" ");
+    serial_write(TWILIGHT_ARCH);
+    serial_write("\n");
 }
