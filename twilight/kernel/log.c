@@ -71,11 +71,6 @@ void klog_color(const char *message, uint8_t red, uint8_t green, uint8_t blue) {
     char prefix[32] = {0};
     format_prefix(prefix);
 
-    /* Always mirror logs to COM1 so framebuffer failures remain debuggable. */
-    serial_write(prefix);
-    serial_write(message);
-    serial_write("\n");
-
     const size_t line_h = font_height() + 2u;
     if (line_h == 2u) return;
 
@@ -85,9 +80,14 @@ void klog_color(const char *message, uint8_t red, uint8_t green, uint8_t blue) {
         log_y = LOG_TOP;
     }
 
+    /* Framebuffer is the primary console. Serial mirroring must never block it. */
     font_draw_string(prefix, LOG_X, log_y, red, green, blue);
     font_draw_string(message, LOG_X + font_width() * 15u, log_y, red, green, blue);
     log_y += line_h;
+
+    serial_write(prefix);
+    serial_write(message);
+    serial_write("\n");
 }
 
 void klog(const char *message) {
