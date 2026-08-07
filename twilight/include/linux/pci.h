@@ -9,6 +9,7 @@
 #include <linux/types.h>
 
 #define PCI_ANY_ID (~0u)
+#define PCI_VENDOR_ID_REDHAT 0x1b36u
 
 #define PCI_COMMAND          0x04
 #define PCI_COMMAND_IO       0x0001
@@ -71,6 +72,7 @@ struct pci_driver {
     const struct pci_device_id *id_table;
     int (*probe)(struct pci_dev *pdev, const struct pci_device_id *id);
     void (*remove)(struct pci_dev *pdev);
+    const void *dev_groups;
 };
 
 #define PCI_SLOT(devfn) (((devfn) >> 3) & 0x1f)
@@ -101,6 +103,7 @@ const struct pci_device_id *pci_match_id(const struct pci_device_id *ids,
 
 int pci_enable_device(struct pci_dev *pdev);
 void pci_disable_device(struct pci_dev *pdev);
+int pcim_enable_device(struct pci_dev *pdev);
 void pci_set_master(struct pci_dev *pdev);
 void pci_clear_master(struct pci_dev *pdev);
 
@@ -110,6 +113,7 @@ unsigned long pci_resource_flags(struct pci_dev *pdev, int bar);
 
 void __iomem *pci_iomap(struct pci_dev *pdev, int bar, unsigned long maxlen);
 void pci_iounmap(struct pci_dev *pdev, void __iomem *address);
+void __iomem *pcim_iomap(struct pci_dev *pdev, int bar, unsigned long maxlen);
 
 int pci_request_regions(struct pci_dev *pdev, const char *name);
 void pci_release_regions(struct pci_dev *pdev);
@@ -144,11 +148,6 @@ static inline void pci_disable_msi(struct pci_dev *pdev) {
     (void)pdev;
 }
 
-/*
- * Linux normally turns module_pci_driver() into module init/exit functions.
- * Twilight records the driver pointer in a linker section and registers those
- * built-in drivers after native PCI enumeration.
- */
 #define module_pci_driver(__pci_driver) \
     static struct pci_driver * const \
     __twilight_builtin_pci_driver_##__pci_driver \
