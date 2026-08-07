@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include <limine.h>
+#include <twilight/apic.h>
 #include <twilight/font.h>
 #include <twilight/font_blob.h>
 #include <twilight/framebuffer.h>
@@ -100,22 +101,27 @@ void kmain(void) {
     idt_init();
     checkpoint("G: IDT initialized", 7);
 
+    if (apic_disable_for_legacy_pic()) {
+        checkpoint("H0: local APIC disabled", 8);
+    } else {
+        checkpoint("H0: APIC not present", 8);
+    }
+
     pic_init();
-    checkpoint("H: PIC initialized", 8);
+    checkpoint("H1: PIC initialized", 9);
 
     pit_init(1000u);
-    checkpoint("I: PIT configured", 9);
+    checkpoint("I: PIT configured", 10);
 
     interrupts_enable();
-    checkpoint("J: interrupts enabled", 10);
+    checkpoint("J: interrupts enabled", 11);
 
-    /* Diagnostic: prove the 0x20 IDT gate/stub/handler works independently of hardware IRQ routing. */
     const uint64_t before_soft_irq = timer_ticks();
     __asm__ volatile ("int $0x20");
     if (timer_ticks() > before_soft_irq) {
-        checkpoint("K0: software IRQ0 path works", 11);
+        checkpoint("K0: software IRQ0 path works", 12);
     } else {
-        checkpoint("K0: software IRQ0 path FAILED", 11);
+        checkpoint("K0: software IRQ0 path FAILED", 12);
         halt_forever();
     }
 
@@ -123,16 +129,16 @@ void kmain(void) {
     while (timer_ticks() == after_soft_irq) {
         __asm__ volatile ("hlt");
     }
-    checkpoint("K1: hardware PIT IRQ0 received", 12);
+    checkpoint("K1: hardware PIT IRQ0 received", 13);
 
     if (!ps2_keyboard_init()) {
-        checkpoint("L: PS/2 init failed", 13);
+        checkpoint("L: PS/2 init failed", 14);
         kernel_panic("PS/2 keyboard initialization failed or timed out");
     }
-    checkpoint("L: PS/2 ACK received", 13);
+    checkpoint("L: PS/2 ACK received", 14);
 
     pic_unmask_irq(1);
-    checkpoint("M: keyboard IRQ1 enabled", 14);
+    checkpoint("M: keyboard IRQ1 enabled", 15);
 
     halt_forever();
 }
