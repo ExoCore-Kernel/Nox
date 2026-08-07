@@ -1,8 +1,7 @@
 /* SPDX-License-Identifier: 0BSD */
 /*
  * Minimal Limine protocol declarations used by Twilight bring-up.
- * Derived from Limine-Bootloader/limine-protocol, revision
- * 80ef54bed402b8c0b672a707c1df4c532f3428ad.
+ * Derived from Limine-Bootloader/limine-protocol.
  */
 #pragma once
 
@@ -15,6 +14,7 @@
 #define LIMINE_BASE_REVISION_SUPPORTED(VAR) ((VAR)[2] == 0)
 #define LIMINE_COMMON_MAGIC 0xc7b1dd30df4c8b88, 0x0a82e883a194f07b
 #define LIMINE_FRAMEBUFFER_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x9d5827dcd881dd75, 0xa3148604f6fab11b }
+#define LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x4b161536e598651e, 0xb390ad4a2f1f303a }
 
 struct limine_video_mode {
     uint64_t pitch;
@@ -60,4 +60,15 @@ struct limine_framebuffer_request {
     uint64_t id[4];
     uint64_t revision;
     struct limine_framebuffer_response *response;
+};
+
+struct limine_executable_cmdline_response {
+    uint64_t revision;
+    char *cmdline;
+};
+
+struct limine_executable_cmdline_request {
+    uint64_t id[4];
+    uint64_t revision;
+    struct limine_executable_cmdline_response *response;
 };
