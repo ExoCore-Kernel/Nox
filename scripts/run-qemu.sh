@@ -56,10 +56,10 @@ case "$MODE" in
         ;;
 esac
 
-# Explicitly expose x2APIC in the development VM. Twilight still starts with
-# the legacy 8259 PIC during bring-up, but can use x2APIC virtual-wire ExtINT
-# as a compatibility bridge when direct PIC->CPU routing is unavailable.
-COMMON_ARGS="-M $MACHINE -cpu qemu64,+x2apic -m 512M -cdrom $ISO -serial stdio -monitor none -no-reboot -no-shutdown"
+# Do not force x2APIC here. qemu-system-x86_64 under TCG on non-x86 hosts
+# (for example a Raspberry Pi) may not implement it. Twilight's compatibility
+# fallback uses ordinary xAPIC virtual-wire mode, which is widely available.
+COMMON_ARGS="-M $MACHINE -cpu qemu64 -m 512M -cdrom $ISO -serial stdio -monitor none -no-reboot -no-shutdown"
 
 if [ "$MODE" = "gui" ]; then
     echo "QEMU display: graphical session detected; opening display window"
