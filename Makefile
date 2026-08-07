@@ -64,7 +64,7 @@ LDFLAGS := \
 	-z max-page-size=0x1000 \
 	-T twilight/linker.ld
 
-.PHONY: all twilight font iso run run-q35 limine clean check-tools new-it FORCE_VERSION
+.PHONY: all twilight font iso run run-gui run-headless run-q35 limine clean check-tools new-it FORCE_VERSION
 
 all: twilight
 
@@ -134,14 +134,20 @@ iso: check-tools $(KERNEL) limine
 	@echo "Built $(ISO)"
 
 run: iso
-	@command -v $(QEMU) >/dev/null || { echo "Missing $(QEMU)"; exit 1; }
-	@echo "Running Twilight on QEMU pc/i440FX (legacy 8259 PIC bring-up target)"
-	$(QEMU) -M pc -m 512M -cdrom $(ISO) -serial stdio -no-reboot -no-shutdown
+	@echo "Running Twilight on QEMU pc/i440FX (auto display detection)"
+	@QEMU="$(QEMU)" sh scripts/run-qemu.sh auto pc $(ISO)
+
+run-gui: iso
+	@echo "Running Twilight on QEMU pc/i440FX (forced graphical display)"
+	@QEMU="$(QEMU)" sh scripts/run-qemu.sh gui pc $(ISO)
+
+run-headless: iso
+	@echo "Running Twilight on QEMU pc/i440FX (forced serial-only mode)"
+	@QEMU="$(QEMU)" sh scripts/run-qemu.sh headless pc $(ISO)
 
 run-q35: iso
-	@command -v $(QEMU) >/dev/null || { echo "Missing $(QEMU)"; exit 1; }
-	@echo "Running Twilight on QEMU q35 (requires APIC/IOAPIC support for reliable hardware IRQ routing)"
-	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -serial stdio -no-reboot -no-shutdown
+	@echo "Running Twilight on QEMU q35 (auto display detection; APIC/IOAPIC support still recommended)"
+	@QEMU="$(QEMU)" sh scripts/run-qemu.sh auto q35 $(ISO)
 
 check-tools:
 	@command -v $(CC) >/dev/null || { echo "Missing clang"; exit 1; }
