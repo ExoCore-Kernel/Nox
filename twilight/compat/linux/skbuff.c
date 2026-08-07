@@ -48,9 +48,8 @@ void dev_kfree_skb(struct sk_buff *skb) {
     kfree(skb);
 }
 
-void kfree_skb(struct sk_buff *skb) {
-    dev_kfree_skb(skb);
-}
+void dev_kfree_skb_any(struct sk_buff *skb) { dev_kfree_skb(skb); }
+void kfree_skb(struct sk_buff *skb) { dev_kfree_skb(skb); }
 
 u8 *skb_put(struct sk_buff *skb, unsigned int length) {
     if (skb == 0 || skb->tail == 0 || skb->end == 0) return 0;
@@ -67,6 +66,21 @@ void skb_reserve(struct sk_buff *skb, unsigned int length) {
     if ((size_t)(skb->end - skb->data) < (size_t)length) return;
     skb->data += length;
     skb->tail += length;
+}
+
+void skb_copy_to_linear_data(struct sk_buff *skb, const void *source, unsigned int length) {
+    if (skb == 0 || skb->data == 0 || source == 0) return;
+    if ((size_t)(skb->end - skb->data) < (size_t)length) return;
+    bytes_copy(skb->data, source, length);
+}
+
+void skb_copy_to_linear_data_offset(struct sk_buff *skb,
+                                    int offset,
+                                    const void *source,
+                                    unsigned int length) {
+    if (skb == 0 || skb->data == 0 || source == 0 || offset < 0) return;
+    if ((size_t)(skb->end - skb->data) < (size_t)offset + (size_t)length) return;
+    bytes_copy(skb->data + (size_t)offset, source, length);
 }
 
 void skb_copy_and_csum_dev(const struct sk_buff *skb, void *destination) {
