@@ -15,8 +15,10 @@ ISO := $(BUILD_DIR)/nox.iso
 LIMINE_DIR := limine-binary
 FONT_C := $(GEN_DIR)/font_blob.c
 
-SOURCES := $(shell find twilight -type f -name '*.c' ! -path 'twilight/src/*' -print)
-OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(SOURCES))
+C_SOURCES := $(shell find twilight -type f -name '*.c' ! -path 'twilight/src/*' -print)
+ASM_SOURCES := $(shell find twilight -type f -name '*.S' -print)
+OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(C_SOURCES))
+OBJECTS += $(patsubst %.S,$(OBJ_DIR)/%.o,$(ASM_SOURCES))
 OBJECTS += $(OBJ_DIR)/generated/font_blob.o
 
 CFLAGS := \
@@ -35,6 +37,13 @@ CFLAGS := \
 	-mno-red-zone \
 	-mcmodel=kernel \
 	-Itwilight/include
+
+ASFLAGS := \
+	-target x86_64-unknown-none-elf \
+	-ffreestanding \
+	-m64 \
+	-march=x86-64 \
+	-mno-red-zone
 
 LDFLAGS := \
 	-m elf_x86_64 \
@@ -66,6 +75,10 @@ $(OBJ_DIR)/generated/font_blob.o: $(FONT_C)
 $(OBJ_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/%.o: %.S
+	@mkdir -p $(dir $@)
+	$(CC) $(ASFLAGS) -c $< -o $@
 
 $(BUILD_DIR):
 	@mkdir -p $@
