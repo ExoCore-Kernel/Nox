@@ -27,17 +27,22 @@ static uint16_t kernel_cs;
 extern void default_interrupt_stub(void);
 extern void irq0_stub(void);
 extern void irq1_stub(void);
+extern void int80_stub(void);
 extern void *exception_stub_table[32];
 
-static void idt_set_gate(uint8_t vector, void (*handler)(void)) {
+static void idt_set_gate_dpl(uint8_t vector, void (*handler)(void), uint8_t dpl) {
     const uint64_t address = (uint64_t)handler;
     idt[vector].offset_low = (uint16_t)(address & 0xffffu);
     idt[vector].selector = kernel_cs;
     idt[vector].ist = 0;
-    idt[vector].type_attr = 0x8e;
+    idt[vector].type_attr = (uint8_t)(0x8eu | ((dpl & 3u) << 5));
     idt[vector].offset_mid = (uint16_t)((address >> 16) & 0xffffu);
     idt[vector].offset_high = (uint32_t)(address >> 32);
     idt[vector].zero = 0;
+}
+
+static void idt_set_gate(uint8_t vector, void (*handler)(void)) {
+    idt_set_gate_dpl(vector, handler, 0);
 }
 
 void idt_init(void) {
@@ -53,6 +58,10 @@ void idt_init(void) {
 
     idt_set_gate(0x20, irq0_stub);
     idt_set_gate(0x21, irq1_stub);
+
+    /* Compatibility syscall trap. DPL3 is intentional: userspace may invoke
+     * INT 0x80 while every hardware IRQ/exception gate remains kernel-only. */
+    idt_set_gate_dpl(0x80, int80_stub, 3);
 
     const struct idtr descriptor = {
         .limit = (uint16_t)(sizeof(idt) - 1),
