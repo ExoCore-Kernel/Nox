@@ -56,10 +56,24 @@ case "$MODE" in
         ;;
 esac
 
-# Do not force x2APIC here. qemu-system-x86_64 under TCG on non-x86 hosts
-# (for example a Raspberry Pi) may not implement it. Twilight's compatibility
-# fallback uses ordinary xAPIC virtual-wire mode, which is widely available.
-COMMON_ARGS="-M $MACHINE -cpu qemu64 -m 512M -cdrom $ISO -serial stdio -monitor none -no-reboot -no-shutdown"
+# The normal 'pc' target is intentionally Twilight's legacy 8259-PIC bring-up
+# environment. Disable the Local APIC from reset so firmware, Limine and the
+# kernel all agree on direct PIC -> CPU interrupt delivery. This is especially
+# important under TCG on non-x86 hosts (for example a Raspberry Pi), where the
+# APIC routing path can differ from KVM/HVF and x2APIC may be unavailable.
+#
+# Keep APIC enabled on q35: that target is reserved for the upcoming native
+# LAPIC + IOAPIC implementation.
+case "$MACHINE" in
+    pc|pc-*)
+        CPU_ARGS="-cpu qemu64,apic=off"
+        ;;
+    *)
+        CPU_ARGS="-cpu qemu64"
+        ;;
+esac
+
+COMMON_ARGS="-M $MACHINE $CPU_ARGS -m 512M -cdrom $ISO -serial stdio -monitor none -no-reboot -no-shutdown"
 
 if [ "$MODE" = "gui" ]; then
     echo "QEMU display: graphical session detected; opening display window"
