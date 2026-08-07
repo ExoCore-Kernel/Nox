@@ -109,7 +109,7 @@ iso: check-tools $(KERNEL) limine
 
 run: iso
 	@command -v $(QEMU) >/dev/null || { echo "Missing $(QEMU)"; exit 1; }
-	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -serial stdio
+	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -serial stdio -no-reboot -no-shutdown
 
 check-tools:
 	@command -v $(CC) >/dev/null || { echo "Missing clang"; exit 1; }
