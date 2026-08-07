@@ -156,3 +156,7 @@ void linux_workqueue_poll(void) {
         __atomic_store_n(&work->state, 0u, __ATOMIC_RELEASE);
     }
 }
+
+void flush_scheduled_work(void) {
+    linux_workqueue_poll();
+}
