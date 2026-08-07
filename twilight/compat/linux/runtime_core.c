@@ -79,13 +79,12 @@ bool linux_driver_runtime_is_initialized(void) {
 }
 
 void linux_driver_runtime_poll(void) {
-    /*
-     * The runtime self-test itself exercises workqueues and timers before
-     * runtime_initialized can become true. Allow polling while initialization
-     * is in progress, but keep it disabled before initialization begins or
-     * after a failed bring-up.
-     */
     if (!runtime_initialized && !runtime_initializing) return;
+
+    /* NAPI is deliberately outside hard IRQ context. Work/timers can schedule
+     * more device activity, so drain NAPI both before and after them. */
+    linux_napi_poll();
     linux_timer_poll();
     linux_workqueue_poll();
+    linux_napi_poll();
 }
