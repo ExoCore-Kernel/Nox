@@ -1,6 +1,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <twilight/log.h>
 #include <twilight/security.h>
 #include <twilight/sha256.h>
 #include <twilight/tpm.h>
@@ -10,11 +11,6 @@ extern const uint8_t __twilight_text_end[];
 extern const uint8_t __twilight_rodata_start[];
 extern const uint8_t __twilight_rodata_end[];
 
-/*
- * PCR 12 records the security contract independently of the code measurement.
- * Changing any of these assumptions intentionally changes the policy digest and
- * makes old TPM-authorized secrets unavailable.
- */
 static const char security_policy_descriptor[] =
     "Twilight.SecurityPolicy.v3|"
     "separate-user-CR3|CPL3|W^X|NX|no-user-IO|"
@@ -52,5 +48,15 @@ bool security_establish_tpm_root_of_trust(void) {
                                                      policy_measurement);
     secure_zero(kernel_measurement, sizeof(kernel_measurement));
     secure_zero(policy_measurement, sizeof(policy_measurement));
+
+    if (success) {
+        struct tpm_status status;
+        tpm_get_status(&status);
+        if (status.persistent_hierarchy) {
+            klog("TPM trust tier: Storage/Owner hierarchy active; measured policy keys can be recreated across reboot");
+        } else {
+            klog("TPM trust tier: Owner hierarchy unavailable; using TPM null hierarchy for per-boot secrets only");
+        }
+    }
     return success;
 }
