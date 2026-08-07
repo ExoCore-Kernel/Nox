@@ -7,6 +7,7 @@
 #include <twilight/interrupts.h>
 #include <twilight/io.h>
 #include <twilight/keyboard.h>
+#include <twilight/linux_compat.h>
 #include <twilight/log.h>
 
 #define PS2_DATA_PORT 0x60u
@@ -144,6 +145,14 @@ bool ps2_keyboard_init(void) {
 
     if (!wait_output_full()) return false;
     if (inb(PS2_DATA_PORT) != PS2_ACK) return false;
+
+    /* entry.c reaches the keyboard only after the PIT and TPM trust probe. This
+     * is therefore the first normal-device point where Linux driver probes may
+     * safely sleep, register IRQs and use DMA without preceding the trust anchor. */
+    if (!linux_driver_runtime_init()) {
+        klog("Linux driver runtime initialization failed after PS/2 controller setup");
+        return false;
+    }
 
     return true;
 }
