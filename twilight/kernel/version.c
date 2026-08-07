@@ -5,14 +5,6 @@
 
 static char os_name_buffer[64] = "Unknown";
 
-static void append(char *out, size_t cap, size_t *i, const char *text) {
-    if (text == 0) return;
-    while (*text != '\0' && *i + 1u < cap) {
-        out[(*i)++] = *text++;
-    }
-    out[*i] = '\0';
-}
-
 const char *twilight_os_name_from_cmdline(const char *cmdline) {
     static const char key[] = "os_name=";
     if (cmdline == 0) return os_name_buffer;
@@ -39,28 +31,27 @@ const char *twilight_os_name_from_cmdline(const char *cmdline) {
 }
 
 void twilight_print_version_banner(const char *os_name) {
-    char line1[160] = {0};
-    char line2[384] = {0};
-    size_t i = 0;
+    const char *line1[] = {
+        "Twilight ",
+        os_name ? os_name : "Unknown",
+        " ",
+        TWILIGHT_VERSION,
+    };
+    klog_parts(line1, sizeof(line1) / sizeof(line1[0]));
 
-    append(line1, sizeof(line1), &i, "Twilight ");
-    append(line1, sizeof(line1), &i, os_name ? os_name : "Unknown");
-    append(line1, sizeof(line1), &i, " ");
-    append(line1, sizeof(line1), &i, TWILIGHT_VERSION);
-    klog(line1);
-
-    i = 0;
-    append(line2, sizeof(line2), &i, "Twilight Kernel Version ");
-    append(line2, sizeof(line2), &i, TWILIGHT_VERSION);
-    append(line2, sizeof(line2), &i, ": ");
-    append(line2, sizeof(line2), &i, twilight_build_date);
-    append(line2, sizeof(line2), &i, "; ");
-    append(line2, sizeof(line2), &i, twilight_build_user);
-    append(line2, sizeof(line2), &i, ":");
-    append(line2, sizeof(line2), &i, twilight_build_id);
-    append(line2, sizeof(line2), &i, "/");
-    append(line2, sizeof(line2), &i, TWILIGHT_RELEASE);
-    append(line2, sizeof(line2), &i, " ");
-    append(line2, sizeof(line2), &i, TWILIGHT_ARCH);
-    klog(line2);
+    const char *line2[] = {
+        "Twilight Kernel Version ",
+        TWILIGHT_VERSION,
+        ": ",
+        twilight_build_date,
+        "; ",
+        twilight_build_user,
+        ":",
+        twilight_build_id,
+        "/",
+        TWILIGHT_RELEASE,
+        " ",
+        TWILIGHT_ARCH,
+    };
+    klog_parts(line2, sizeof(line2) / sizeof(line2[0]));
 }
