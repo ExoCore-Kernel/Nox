@@ -1,0 +1,63 @@
+/* SPDX-License-Identifier: 0BSD */
+/*
+ * Minimal Limine protocol declarations used by Twilight bring-up.
+ * Derived from Limine-Bootloader/limine-protocol, revision
+ * 80ef54bed402b8c0b672a707c1df4c532f3428ad.
+ */
+#pragma once
+
+#include <stdint.h>
+
+#define LIMINE_REQUESTS_START_MARKER { 0xf6b8f4b39de7d1ae, 0xfab91a6940fcb9cf, \
+                                       0x785c6ed015d3e316, 0x181e920a7852b9d9 }
+#define LIMINE_REQUESTS_END_MARKER { 0xadc0e0531bb10d03, 0x9572709f31764c62 }
+#define LIMINE_BASE_REVISION(N) { 0xf9562b2d5c95a6c8, 0x6a7b384944536bdc, (N) }
+#define LIMINE_BASE_REVISION_SUPPORTED(VAR) ((VAR)[2] == 0)
+#define LIMINE_COMMON_MAGIC 0xc7b1dd30df4c8b88, 0x0a82e883a194f07b
+#define LIMINE_FRAMEBUFFER_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x9d5827dcd881dd75, 0xa3148604f6fab11b }
+
+struct limine_video_mode {
+    uint64_t pitch;
+    uint64_t width;
+    uint64_t height;
+    uint16_t bpp;
+    uint8_t memory_model;
+    uint8_t red_mask_size;
+    uint8_t red_mask_shift;
+    uint8_t green_mask_size;
+    uint8_t green_mask_shift;
+    uint8_t blue_mask_size;
+    uint8_t blue_mask_shift;
+};
+
+struct limine_framebuffer {
+    void *address;
+    uint64_t width;
+    uint64_t height;
+    uint64_t pitch;
+    uint16_t bpp;
+    uint8_t memory_model;
+    uint8_t red_mask_size;
+    uint8_t red_mask_shift;
+    uint8_t green_mask_size;
+    uint8_t green_mask_shift;
+    uint8_t blue_mask_size;
+    uint8_t blue_mask_shift;
+    uint8_t unused[7];
+    uint64_t edid_size;
+    void *edid;
+    uint64_t mode_count;
+    struct limine_video_mode **modes;
+};
+
+struct limine_framebuffer_response {
+    uint64_t revision;
+    uint64_t framebuffer_count;
+    struct limine_framebuffer **framebuffers;
+};
+
+struct limine_framebuffer_request {
+    uint64_t id[4];
+    uint64_t revision;
+    struct limine_framebuffer_response *response;
+};
