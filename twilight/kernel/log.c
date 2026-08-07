@@ -49,7 +49,6 @@ static void ensure_room_for_line(void) {
 
     if (line_h <= 2u || bottom <= LOG_TOP) return;
 
-    /* Reserve one full line below the newest log for the heartbeat cursor. */
     while (log_y + line_h + font_height() >= bottom) {
         heartbeat_erase();
         framebuffer_scroll_region_up(LOG_TOP, bottom, line_h,
@@ -158,6 +157,12 @@ void klog_heartbeat_update(void) {
         font_draw_string("_", LOG_X, heartbeat_y, LOG_FG_R, LOG_FG_G, LOG_FG_B);
         heartbeat_visible = true;
     }
+}
+
+size_t klog_next_console_y(void) {
+    ensure_room_for_line();
+    heartbeat_y = log_y;
+    return log_y;
 }
 
 void klog_parts(const char *const *parts, size_t count) {
