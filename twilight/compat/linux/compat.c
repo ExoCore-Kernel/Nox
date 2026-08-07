@@ -71,12 +71,6 @@ bool linux_compat_self_test(void) {
         return false;
     }
 
-    const int builtin_result = linux_pci_register_builtin_drivers();
-    if (builtin_result != 0) {
-        pr_err("built-in Linux PCI driver registration failed: %d", builtin_result);
-        return false;
-    }
-
-    pr_info("Linux PCI compatibility ready: config, BARs, matching and built-in driver registration");
+    pr_info("Linux PCI compatibility ready: config, BARs and driver matching; hardware driver binding deferred until IRQ bring-up");
     return true;
 }
