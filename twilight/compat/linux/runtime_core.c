@@ -8,8 +8,25 @@
 void linux_workqueue_poll(void);
 void linux_timer_poll(void);
 
+extern int (*__twilight_initcalls_start[])(void);
+extern int (*__twilight_initcalls_end[])(void);
+
 static bool runtime_initialized;
 static bool runtime_initializing;
+
+static bool run_builtin_initcalls(void) {
+    for (int (**entry)(void) = __twilight_initcalls_start;
+         entry < __twilight_initcalls_end;
+         ++entry) {
+        if (*entry == 0) continue;
+        const int result = (*entry)();
+        if (result != 0) {
+            pr_err("Linux module initcall failed: %d", result);
+            return false;
+        }
+    }
+    return true;
+}
 
 bool linux_driver_runtime_init(void) {
     if (runtime_initialized) return true;
@@ -28,6 +45,11 @@ bool linux_driver_runtime_init(void) {
     }
 
     pr_info("driver runtime self-test: IRQ, coherent/streaming DMA, workqueues and timers ready");
+
+    if (!run_builtin_initcalls()) {
+        runtime_initializing = false;
+        return false;
+    }
 
     const int result = linux_pci_register_builtin_drivers();
     if (result != 0) {
