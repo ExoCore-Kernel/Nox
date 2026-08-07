@@ -12,7 +12,7 @@ build_number = int((root / "twilight" / "build-number.txt").read_text().strip())
 now = datetime.datetime.now().astimezone()
 build_date = now.strftime("%a %b %e %H:%M:%S %Z %Y")
 build_user = os.environ.get("USER") or os.environ.get("LOGNAME") or "root"
-build_id = f"tnu-{build_number:05d}.1.0.0~0"
+build_id = f"tnu-{build_number:05d}.0.0~0"
 
 out = pathlib.Path(sys.argv[1])
 out.parent.mkdir(parents=True, exist_ok=True)
