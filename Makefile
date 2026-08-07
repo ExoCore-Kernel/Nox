@@ -12,6 +12,8 @@ HEAP_SELF_TEST ?= 1
 USERMODE_SELF_TEST ?= 1
 LINUX_COMPAT_SELF_TEST ?= 1
 SCROLL_SELF_TEST ?= 0
+TPM_STATE_DIR ?= .nox-tpm-state
+TPM_MODE ?= auto
 
 BUILD_DIR := build
 OBJ_DIR := $(BUILD_DIR)/obj
@@ -73,7 +75,7 @@ LDFLAGS := \
 	-z max-page-size=0x1000 \
 	-T twilight/linker.ld
 
-.PHONY: all twilight font iso run run-gui run-headless run-q35 limine clean check-tools new-it FORCE_VERSION
+.PHONY: all twilight font iso run run-gui run-headless run-q35 run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
 
 all: twilight
 
@@ -157,6 +159,14 @@ run-headless: iso
 run-q35: iso
 	@echo "Running Twilight on QEMU q35 (auto display detection; APIC/IOAPIC support still recommended)"
 	@QEMU="$(QEMU)" sh scripts/run-qemu.sh auto q35 $(ISO)
+
+run-tpm: iso
+	@echo "Running Twilight with persistent emulated TPM 2.0 (CRB frontend)"
+	@QEMU="$(QEMU)" TPM_STATE_DIR="$(TPM_STATE_DIR)" sh scripts/run-qemu-tpm.sh "$(TPM_MODE)" pc $(ISO)
+
+tpm-reset:
+	@echo "Resetting emulated TPM state: $(TPM_STATE_DIR)"
+	rm -rf "$(TPM_STATE_DIR)"
 
 check-tools:
 	@command -v $(CC) >/dev/null || { echo "Missing clang"; exit 1; }
