@@ -25,8 +25,9 @@ VERSION_C := $(GEN_DIR)/version_blob.c
 
 C_SOURCES := $(shell find twilight -type f -name '*.c' ! -path 'twilight/src/*' -print)
 ASM_SOURCES := $(shell find twilight -type f -name '*.S' -print)
-OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(C_SOURCES))
-OBJECTS += $(patsubst %.S,$(OBJ_DIR)/%.o,$(ASM_SOURCES))
+C_OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(C_SOURCES))
+ASM_OBJECTS := $(patsubst %.S,$(OBJ_DIR)/%.S.o,$(ASM_SOURCES))
+OBJECTS := $(C_OBJECTS) $(ASM_OBJECTS)
 OBJECTS += $(OBJ_DIR)/generated/font_blob.o
 OBJECTS += $(OBJ_DIR)/generated/version_blob.o
 
@@ -110,7 +111,7 @@ $(OBJ_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/%.o: %.S
+$(OBJ_DIR)/%.S.o: %.S
 	@mkdir -p $(dir $@)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
