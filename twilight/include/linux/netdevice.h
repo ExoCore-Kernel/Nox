@@ -5,6 +5,7 @@
 
 #include <linux/device.h>
 #include <linux/if_ether.h>
+#include <linux/jiffies.h>
 #include <linux/skbuff.h>
 #include <linux/types.h>
 
