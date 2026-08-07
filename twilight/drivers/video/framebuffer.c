@@ -4,12 +4,8 @@
 static struct limine_framebuffer *fb;
 
 static uint32_t scale_component(uint8_t value, uint8_t bits) {
-    if (bits == 0) {
-        return 0;
-    }
-    if (bits >= 8) {
-        return (uint32_t)value << (bits - 8);
-    }
+    if (bits == 0) return 0;
+    if (bits >= 8) return (uint32_t)value << (bits - 8);
     return (uint32_t)value >> (8 - bits);
 }
 
@@ -20,27 +16,20 @@ static uint32_t pack_rgb(uint8_t red, uint8_t green, uint8_t blue) {
 }
 
 bool framebuffer_init(struct limine_framebuffer *framebuffer) {
-    if (framebuffer == NULL || framebuffer->address == NULL || framebuffer->bpp != 32) {
-        return false;
-    }
+    if (framebuffer == NULL || framebuffer->address == NULL || framebuffer->bpp != 32) return false;
     fb = framebuffer;
     return true;
 }
 
 void framebuffer_put_pixel(size_t x, size_t y, uint8_t red, uint8_t green, uint8_t blue) {
-    if (fb == NULL || x >= fb->width || y >= fb->height) {
-        return;
-    }
-
+    if (fb == NULL || x >= fb->width || y >= fb->height) return;
     volatile uint32_t *row = (volatile uint32_t *)((uintptr_t)fb->address + y * fb->pitch);
     row[x] = pack_rgb(red, green, blue);
 }
 
 void framebuffer_fill_rect(size_t x, size_t y, size_t width, size_t height,
                            uint8_t red, uint8_t green, uint8_t blue) {
-    if (fb == NULL || x >= fb->width || y >= fb->height) {
-        return;
-    }
+    if (fb == NULL || x >= fb->width || y >= fb->height) return;
 
     size_t end_x = x + width;
     size_t end_y = y + height;
@@ -50,16 +39,34 @@ void framebuffer_fill_rect(size_t x, size_t y, size_t width, size_t height,
     const uint32_t colour = pack_rgb(red, green, blue);
     for (size_t py = y; py < end_y; ++py) {
         volatile uint32_t *row = (volatile uint32_t *)((uintptr_t)fb->address + py * fb->pitch);
-        for (size_t px = x; px < end_x; ++px) {
-            row[px] = colour;
-        }
+        for (size_t px = x; px < end_x; ++px) row[px] = colour;
     }
 }
 
-void framebuffer_clear(uint8_t red, uint8_t green, uint8_t blue) {
-    if (fb == NULL) {
+void framebuffer_scroll_region_up(size_t top, size_t bottom, size_t pixels,
+                                  uint8_t red, uint8_t green, uint8_t blue) {
+    if (fb == NULL || top >= fb->height) return;
+    if (bottom > fb->height) bottom = fb->height;
+    if (bottom <= top) return;
+
+    const size_t region_height = bottom - top;
+    if (pixels == 0) return;
+    if (pixels >= region_height) {
+        framebuffer_fill_rect(0, top, fb->width, region_height, red, green, blue);
         return;
     }
+
+    for (size_t y = top; y < bottom - pixels; ++y) {
+        volatile uint32_t *dst = (volatile uint32_t *)((uintptr_t)fb->address + y * fb->pitch);
+        volatile const uint32_t *src = (volatile const uint32_t *)((uintptr_t)fb->address + (y + pixels) * fb->pitch);
+        for (size_t x = 0; x < fb->width; ++x) dst[x] = src[x];
+    }
+
+    framebuffer_fill_rect(0, bottom - pixels, fb->width, pixels, red, green, blue);
+}
+
+void framebuffer_clear(uint8_t red, uint8_t green, uint8_t blue) {
+    if (fb == NULL) return;
     framebuffer_fill_rect(0, 0, fb->width, fb->height, red, green, blue);
 }
 
