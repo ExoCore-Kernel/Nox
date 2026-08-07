@@ -30,3 +30,10 @@ static inline size_t strlen(const char *string) {
     while (string[length] != '\0') ++length;
     return length;
 }
+
+static inline char *strcpy(char *destination, const char *source) {
+    char *out = destination;
+    if (destination == 0 || source == 0) return destination;
+    do { *out++ = *source; } while (*source++ != '\0');
+    return destination;
+}
