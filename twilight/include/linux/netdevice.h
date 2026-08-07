@@ -41,6 +41,14 @@ struct ethtool_ops;
 struct ifreq;
 struct net_device;
 
+/* Linux 2.6 multicast list representation used by the unmodified 8139too
+ * source. Twilight currently leaves the list empty unless a networking layer
+ * explicitly installs multicast addresses. */
+struct dev_mc_list {
+    struct dev_mc_list *next;
+    u8 dmi_addr[ETH_ALEN];
+};
+
 struct net_device_stats {
     u64 rx_packets;
     u64 tx_packets;
@@ -114,10 +122,14 @@ struct net_device {
     unsigned int min_mtu;
     unsigned int max_mtu;
 
+    struct dev_mc_list *mc_list;
+    int mc_count;
+
     bool registered;
     bool running;
     bool queue_stopped;
     bool device_attached;
+    bool carrier;
     void *priv;
 };
 
@@ -133,6 +145,16 @@ void netif_stop_queue(struct net_device *dev);
 void netif_wake_queue(struct net_device *dev);
 bool netif_queue_stopped(const struct net_device *dev);
 bool netif_running(const struct net_device *dev);
+
+static inline void netif_carrier_on(struct net_device *dev) {
+    if (dev != 0) dev->carrier = true;
+}
+static inline void netif_carrier_off(struct net_device *dev) {
+    if (dev != 0) dev->carrier = false;
+}
+static inline bool netif_carrier_ok(const struct net_device *dev) {
+    return dev != 0 && dev->carrier;
+}
 
 void netif_napi_add(struct net_device *dev,
                     struct napi_struct *napi,
