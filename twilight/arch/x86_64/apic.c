@@ -96,14 +96,18 @@ bool apic_disable_for_legacy_pic(void) {
 
     uint64_t base = rdmsr(IA32_APIC_BASE_MSR);
 
-    /* If x2APIC was active, leave x2APIC before disabling the APIC globally. */
+    /*
+     * Intel permits x2APIC -> disabled, but not x2APIC -> xAPIC directly.
+     * If x2APIC is active, clear both mode bits in one transition.
+     */
     if ((base & IA32_APIC_BASE_X2APIC) != 0) {
-        base &= ~IA32_APIC_BASE_X2APIC;
+        base &= ~(IA32_APIC_BASE_ENABLE | IA32_APIC_BASE_X2APIC);
+        wrmsr(IA32_APIC_BASE_MSR, base);
+    } else {
+        base &= ~IA32_APIC_BASE_ENABLE;
         wrmsr(IA32_APIC_BASE_MSR, base);
     }
 
-    base &= ~IA32_APIC_BASE_ENABLE;
-    wrmsr(IA32_APIC_BASE_MSR, base);
     return true;
 }
 
