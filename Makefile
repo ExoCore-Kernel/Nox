@@ -14,7 +14,7 @@ ISO := $(BUILD_DIR)/nox.iso
 LIMINE_DIR := limine-binary
 FONT_C := $(GEN_DIR)/font_blob.c
 
-SOURCES := $(shell find twilight -type f -name '*.c' -print)
+SOURCES := $(shell find twilight -type f -name '*.c' ! -path 'twilight/src/*' -print)
 OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(SOURCES))
 OBJECTS += $(OBJ_DIR)/generated/font_blob.o
 
