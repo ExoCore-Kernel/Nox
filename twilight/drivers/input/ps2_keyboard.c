@@ -7,7 +7,6 @@
 #include <twilight/interrupts.h>
 #include <twilight/io.h>
 #include <twilight/keyboard.h>
-#include <twilight/log.h>
 
 #define PS2_DATA_PORT 0x60u
 #define PS2_STATUS_PORT 0x64u
@@ -26,7 +25,6 @@ static bool left_shift;
 static bool right_shift;
 static bool caps_lock;
 static bool extended_prefix;
-static bool first_irq_logged;
 static size_t cursor_x;
 static size_t cursor_y;
 static size_t line_start_x;
@@ -122,36 +120,26 @@ bool ps2_keyboard_init(void) {
     right_shift = false;
     caps_lock = false;
     extended_prefix = false;
-    first_irq_logged = false;
 
     line_start_x = 48u;
     cursor_x = line_start_x;
     cursor_y = 300u;
 
-    klog("PS/2: flushing controller output buffer");
     flush_output();
 
     if (!wait_input_clear()) return false;
     outb(PS2_COMMAND_PORT, 0xaeu);
-    klog("PS/2: first controller port enabled");
 
     if (!wait_input_clear()) return false;
     outb(PS2_DATA_PORT, 0xf4u);
-    klog("PS/2: enable-scanning command sent");
 
     if (!wait_output_full()) return false;
     if (inb(PS2_DATA_PORT) != PS2_ACK) return false;
 
-    klog("PS/2: device returned ACK 0xFA");
     return true;
 }
 
 void keyboard_irq_handler(void) {
-    if (!first_irq_logged) {
-        first_irq_logged = true;
-        klog("PS/2: IRQ1 received from keyboard");
-    }
-
     const uint8_t status = inb(PS2_STATUS_PORT);
     if ((status & 0x01u) == 0) {
         pic_send_eoi(1);
