@@ -27,6 +27,20 @@ static uint16_t kernel_cs;
 extern void default_interrupt_stub(void);
 extern void irq0_stub(void);
 extern void irq1_stub(void);
+extern void irq2_stub(void);
+extern void irq3_stub(void);
+extern void irq4_stub(void);
+extern void irq5_stub(void);
+extern void irq6_stub(void);
+extern void irq7_stub(void);
+extern void irq8_stub(void);
+extern void irq9_stub(void);
+extern void irq10_stub(void);
+extern void irq11_stub(void);
+extern void irq12_stub(void);
+extern void irq13_stub(void);
+extern void irq14_stub(void);
+extern void irq15_stub(void);
 extern void int80_stub(void);
 extern void *exception_stub_table[32];
 
@@ -48,16 +62,20 @@ static void idt_set_gate(uint8_t vector, void (*handler)(void)) {
 void idt_init(void) {
     __asm__ volatile ("mov %%cs, %0" : "=r"(kernel_cs));
 
-    for (size_t i = 0; i < 256; ++i) {
-        idt_set_gate((uint8_t)i, default_interrupt_stub);
-    }
-
+    for (size_t i = 0; i < 256; ++i) idt_set_gate((uint8_t)i, default_interrupt_stub);
     for (size_t i = 0; i < 32; ++i) {
         idt_set_gate((uint8_t)i, (void (*)(void))exception_stub_table[i]);
     }
 
-    idt_set_gate(0x20, irq0_stub);
-    idt_set_gate(0x21, irq1_stub);
+    void (*const legacy_irq_stubs[16])(void) = {
+        irq0_stub, irq1_stub, irq2_stub, irq3_stub,
+        irq4_stub, irq5_stub, irq6_stub, irq7_stub,
+        irq8_stub, irq9_stub, irq10_stub, irq11_stub,
+        irq12_stub, irq13_stub, irq14_stub, irq15_stub,
+    };
+    for (size_t irq = 0; irq < 16; ++irq) {
+        idt_set_gate((uint8_t)(0x20u + irq), legacy_irq_stubs[irq]);
+    }
 
     /* Compatibility syscall trap. DPL3 is intentional: userspace may invoke
      * INT 0x80 while every hardware IRQ/exception gate remains kernel-only. */
@@ -80,11 +98,12 @@ void pic_init(void) {
     outb(0x21, 0x01); io_wait();
     outb(0xa1, 0x01); io_wait();
 
-    outb(0x21, 0xfeu); /* IRQ0 only; IRQ1 stays masked until PS/2 init succeeds */
+    outb(0x21, 0xfeu); /* IRQ0 only; IRQ1 and PCI lines start masked. */
     outb(0xa1, 0xffu);
 }
 
 void pic_mask_irq(uint8_t irq) {
+    if (irq >= 16u) return;
     const uint16_t port = irq < 8u ? 0x21u : 0xa1u;
     const uint8_t bit = (uint8_t)(irq & 7u);
     const uint8_t mask = inb(port);
@@ -92,6 +111,14 @@ void pic_mask_irq(uint8_t irq) {
 }
 
 void pic_unmask_irq(uint8_t irq) {
+    if (irq >= 16u) return;
+
+    if (irq >= 8u) {
+        /* Slave PIC interrupts reach the CPU through the master's IRQ2 cascade. */
+        const uint8_t master_mask = inb(0x21u);
+        outb(0x21u, (uint8_t)(master_mask & (uint8_t)~(1u << 2)));
+    }
+
     const uint16_t port = irq < 8u ? 0x21u : 0xa1u;
     const uint8_t bit = (uint8_t)(irq & 7u);
     const uint8_t mask = inb(port);
@@ -103,21 +130,19 @@ uint8_t pic_master_mask(void) {
 }
 
 uint8_t pic_master_irr(void) {
-    outb(0x20u, 0x0au); /* OCW3: read Interrupt Request Register */
+    outb(0x20u, 0x0au);
     io_wait();
     return inb(0x20u);
 }
 
 uint8_t pic_master_isr(void) {
-    outb(0x20u, 0x0bu); /* OCW3: read In-Service Register */
+    outb(0x20u, 0x0bu);
     io_wait();
     return inb(0x20u);
 }
 
 void pic_send_eoi(uint8_t irq) {
-    if (irq >= 8) {
-        outb(0xa0, 0x20);
-    }
+    if (irq >= 8) outb(0xa0, 0x20);
     outb(0x20, 0x20);
     apic_eoi_if_needed();
 }
