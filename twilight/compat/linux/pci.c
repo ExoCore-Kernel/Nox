@@ -47,9 +47,7 @@ static bool ensure_wrappers(void) {
     const size_t count = pci_device_count();
     if (count > TWILIGHT_PCI_MAX_DEVICES) return false;
 
-    for (unsigned bus = 0; bus < 256u; ++bus) {
-        linux_buses[bus].number = (u8)bus;
-    }
+    for (unsigned bus = 0; bus < 256u; ++bus) linux_buses[bus].number = (u8)bus;
 
     for (size_t i = 0; i < count; ++i) {
         struct twilight_pci_device *native = pci_device_at(i);
@@ -61,6 +59,11 @@ static bool ensure_wrappers(void) {
 
         pdev->dev.init_name = linux_device_names[i];
         pdev->dev.driver_data = native->driver_data;
+        /* Conservative PCI default. A driver may widen this explicitly with
+         * dma_set_mask_and_coherent() after checking its hardware capability. */
+        pdev->dev.dma_mask_storage = 0xffffffffull;
+        pdev->dev.dma_mask = &pdev->dev.dma_mask_storage;
+        pdev->dev.coherent_dma_mask = 0xffffffffull;
         pdev->bus = &linux_buses[native->bus];
         pdev->devfn = PCI_DEVFN(native->slot, native->function);
         pdev->vendor = native->vendor_id;
@@ -127,10 +130,16 @@ int pci_register_driver(struct pci_driver *driver) {
         const struct pci_device_id *id = pci_match_id(driver->id_table, pdev);
         if (id == 0) continue;
 
+        void *const previous_driver_data = pdev->dev.driver_data;
         const int result = driver->probe(pdev, id);
         if (result == 0) {
             native->bound_driver = driver;
             native->driver_data = pdev->dev.driver_data;
+        } else {
+            /* Linux devres unwinds everything acquired by a failed probe. */
+            devm_release_all(&pdev->dev);
+            pdev->dev.driver_data = previous_driver_data;
+            native->driver_data = previous_driver_data;
         }
     }
 
@@ -146,15 +155,16 @@ void pci_unregister_driver(struct pci_driver *driver) {
         if (native == 0 || native->bound_driver != driver) continue;
 
         if (driver->remove != 0) driver->remove(pdev);
-        native->driver_data = pdev->dev.driver_data;
+        devm_release_all(&pdev->dev);
+        pdev->dev.driver_data = 0;
+        native->driver_data = 0;
         native->bound_driver = 0;
     }
 
     for (size_t i = 0; i < registered_driver_count; ++i) {
         if (registered_drivers[i] != driver) continue;
-        for (size_t j = i + 1; j < registered_driver_count; ++j) {
+        for (size_t j = i + 1; j < registered_driver_count; ++j)
             registered_drivers[j - 1] = registered_drivers[j];
-        }
         --registered_driver_count;
         registered_drivers[registered_driver_count] = 0;
         break;
@@ -289,9 +299,7 @@ int pci_find_capability(struct pci_dev *pdev, int capability) {
 
     u16 status = 0;
     if (pci_read_config_word(pdev, PCI_STATUS, &status) != 0 ||
-        (status & PCI_STATUS_CAP_LIST) == 0) {
-        return 0;
-    }
+        (status & PCI_STATUS_CAP_LIST) == 0) return 0;
 
     u8 pointer = 0;
     if (pci_read_config_byte(pdev, PCI_CAPABILITY_LIST, &pointer) != 0) return 0;
