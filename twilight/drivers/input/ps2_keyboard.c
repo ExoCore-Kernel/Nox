@@ -78,10 +78,7 @@ static void attach_console_if_needed(void) {
 static void console_newline(void) {
     attach_console_if_needed();
     cursor_x = line_start_x;
-    cursor_y += font_height() + 2u;
-    if (cursor_y + font_height() >= framebuffer_height()) {
-        cursor_y = klog_next_console_y();
-    }
+    cursor_y = klog_console_newline_y();
 }
 
 static void console_backspace(void) {
