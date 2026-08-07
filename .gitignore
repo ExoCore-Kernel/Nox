@@ -1,0 +1,7 @@
+build/
+iso_root/
+limine-binary/
+twilight/bin/
+twilight/obj/
+*.iso
+.DS_Store
