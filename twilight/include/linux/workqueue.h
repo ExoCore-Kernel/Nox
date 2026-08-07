@@ -39,6 +39,7 @@ bool schedule_work(struct work_struct *work);
 bool queue_work(struct workqueue_struct *wq, struct work_struct *work);
 bool cancel_work_sync(struct work_struct *work);
 void flush_work(struct work_struct *work);
+void flush_scheduled_work(void);
 
 bool schedule_delayed_work(struct delayed_work *work, unsigned long delay);
 bool queue_delayed_work(struct workqueue_struct *wq,
