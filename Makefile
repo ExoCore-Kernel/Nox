@@ -15,12 +15,14 @@ KERNEL := $(BUILD_DIR)/twilight.elf
 ISO := $(BUILD_DIR)/nox.iso
 LIMINE_DIR := limine-binary
 FONT_C := $(GEN_DIR)/font_blob.c
+VERSION_C := $(GEN_DIR)/version_blob.c
 
 C_SOURCES := $(shell find twilight -type f -name '*.c' ! -path 'twilight/src/*' -print)
 ASM_SOURCES := $(shell find twilight -type f -name '*.S' -print)
 OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(C_SOURCES))
 OBJECTS += $(patsubst %.S,$(OBJ_DIR)/%.o,$(ASM_SOURCES))
 OBJECTS += $(OBJ_DIR)/generated/font_blob.o
+OBJECTS += $(OBJ_DIR)/generated/version_blob.o
 
 CFLAGS := \
 	-target x86_64-unknown-none-elf \
@@ -54,7 +56,7 @@ LDFLAGS := \
 	-z max-page-size=0x1000 \
 	-T twilight/linker.ld
 
-.PHONY: all twilight font iso run limine clean check-tools
+.PHONY: all twilight font iso run limine clean check-tools new-it FORCE_VERSION
 
 all: twilight
 
@@ -62,15 +64,29 @@ twilight: check-tools $(KERNEL)
 
 font: $(FONT_C)
 
+new-it:
+	$(PYTHON) scripts/bump-build.py
+	@rm -f $(VERSION_C) $(OBJ_DIR)/generated/version_blob.o $(KERNEL) $(ISO)
+
 $(FONT_C): scripts/embed-font.py
 	@mkdir -p $(GEN_DIR)
 	$(PYTHON) scripts/embed-font.py $@
+
+FORCE_VERSION:
+
+$(VERSION_C): FORCE_VERSION scripts/gen-version.py twilight/build-number.txt
+	@mkdir -p $(GEN_DIR)
+	$(PYTHON) scripts/gen-version.py $@
 
 $(KERNEL): $(OBJECTS) twilight/linker.ld | $(BUILD_DIR)
 	$(LD) $(LDFLAGS) $(OBJECTS) -o $@
 	@echo "Built $(KERNEL)"
 
 $(OBJ_DIR)/generated/font_blob.o: $(FONT_C)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/generated/version_blob.o: $(VERSION_C)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
