@@ -7,7 +7,6 @@
 #include <twilight/interrupts.h>
 #include <twilight/io.h>
 #include <twilight/keyboard.h>
-#include <twilight/linux_compat.h>
 #include <twilight/log.h>
 
 #define PS2_DATA_PORT 0x60u
@@ -145,18 +144,6 @@ bool ps2_keyboard_init(void) {
 
     if (!wait_output_full()) return false;
     if (inb(PS2_DATA_PORT) != PS2_ACK) return false;
-
-    /*
-     * Temporary post-ACK device-manager hook. The keyboard has already
-     * initialized successfully at this point, so Linux compatibility failures
-     * must never be reported as PS/2 failures. This will move into a dedicated
-     * device-manager stage once the upstream-driver bring-up is stable.
-     */
-    if (!linux_driver_runtime_init()) {
-        klog("Linux driver runtime unavailable; PS/2 keyboard remains operational");
-    } else {
-        klog("Linux driver runtime initialized after interrupt/trust bring-up");
-    }
 
     return true;
 }
