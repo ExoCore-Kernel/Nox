@@ -16,7 +16,10 @@
 
 extern const uint8_t user_probe_blob_start[];
 extern const uint8_t user_probe_blob_end[];
-extern void user_mode_enter(uint64_t instruction_pointer, uint64_t stack_pointer);
+extern void user_mode_enter(uint64_t instruction_pointer,
+                            uint64_t stack_pointer,
+                            vmm_space_t user_space,
+                            vmm_space_t kernel_space);
 
 static volatile bool probe_ping_seen;
 static volatile bool probe_exit_seen;
@@ -33,12 +36,6 @@ static void bytes_copy(void *destination, const void *source, size_t size) {
     for (size_t i = 0; i < size; ++i) out[i] = in[i];
 }
 
-static uint64_t current_rsp(void) {
-    uint64_t value;
-    __asm__ volatile ("mov %%rsp, %0" : "=r"(value));
-    return value;
-}
-
 bool user_mode_is_available(void) {
     return gdt_is_initialized() && vmm_is_initialized();
 }
@@ -51,8 +48,8 @@ int user_syscall_dispatch(uint64_t syscall_number) {
 
     if (syscall_number == USER_TEST_SYSCALL_EXIT) {
         probe_exit_seen = true;
-        /* The assembly stub consumes the privilege-change frame and returns
-         * directly to the kernel call site instead of IRETQing to ring 3. */
+        /* The assembly stub restores the kernel CR3 and kernel stack instead
+         * of IRETQing back to CPL3 for this test-only exit call. */
         return 1;
     }
 
@@ -88,7 +85,6 @@ bool user_mode_self_test(void) {
     uint64_t stack_phys = 0;
     bool code_mapped = false;
     bool stack_mapped = false;
-    bool returned_to_kernel_space = true;
     bool success = false;
 
     user_space = vmm_create_address_space();
@@ -98,12 +94,13 @@ bool user_mode_self_test(void) {
     }
     trace_user("separate user address space created");
 
-    uint64_t ignored = 0;
-    if (vmm_translate(user_space, USER_TEST_CODE_VA, &ignored, 0)) {
+    uint64_t translated = 0;
+    uint64_t flags = 0;
+    if (vmm_translate(user_space, USER_TEST_CODE_VA, &translated, 0)) {
         trace_user("user code VA unexpectedly occupied");
         goto cleanup;
     }
-    if (vmm_translate(user_space, USER_TEST_STACK_VA, &ignored, 0)) {
+    if (vmm_translate(user_space, USER_TEST_STACK_VA, &translated, 0)) {
         trace_user("user stack VA unexpectedly occupied");
         goto cleanup;
     }
@@ -121,8 +118,7 @@ bool user_mode_self_test(void) {
     }
     trace_user("code and stack physical pages allocated");
 
-    /* Copy through the HHDM so the user address space never needs to be active
-     * while executable bytes are being installed. */
+    /* Copy through the HHDM while the kernel CR3 is active. */
     void *code_direct = pmm_phys_to_virt(code_phys);
     if (code_direct == 0) {
         trace_user("code HHDM mapping unavailable");
@@ -158,9 +154,7 @@ bool user_mode_self_test(void) {
         goto cleanup;
     }
 
-    /* Verify the effective permissions before ever loading the user CR3. */
-    uint64_t translated = 0;
-    uint64_t flags = 0;
+    /* Verify the effective permissions before the assembly ever loads CR3. */
     if (!vmm_translate(user_space, USER_TEST_CODE_VA, &translated, &flags) ||
         translated != code_phys ||
         (flags & VMM_FLAG_USER) == 0 ||
@@ -181,53 +175,43 @@ bool user_mode_self_test(void) {
         trace_user("user stack unexpectedly executable");
         goto cleanup;
     }
-    trace_user("user mappings passed permission preflight");
 
-    /* We currently switch CR3 before calling the assembly transition helper.
-     * Prove that both the executing kernel text and current kernel stack are
-     * visible through the cloned address space first. This catches bootloader
-     * stack placement differences without taking a blind page fault. */
-    const uint64_t kernel_rip_probe = (uint64_t)(uintptr_t)&user_mode_self_test;
-    const uint64_t kernel_rsp_probe = current_rsp();
-    if (!vmm_translate(user_space, kernel_rip_probe, &translated, &flags)) {
-        trace_user("preflight failed: kernel text missing from user CR3");
+    /* Kernel text must be shared into every process CR3 because the CPU enters
+     * the Ring-0 syscall/exception stubs before Twilight can switch back to the
+     * kernel address space. */
+    if (!vmm_translate(user_space,
+                       (uint64_t)(uintptr_t)&user_mode_enter,
+                       &translated,
+                       &flags)) {
+        trace_user("preflight failed: transition code missing from user CR3");
         goto cleanup;
     }
-    if (!vmm_translate(user_space, kernel_rsp_probe, &translated, &flags)) {
-        trace_user("preflight failed: current kernel stack missing from user CR3");
+    if (!vmm_translate(user_space,
+                       (uint64_t)(uintptr_t)&user_syscall_dispatch,
+                       &translated,
+                       &flags)) {
+        trace_user("preflight failed: syscall dispatcher missing from user CR3");
         goto cleanup;
     }
-    if (kernel_rsp_probe >= TWILIGHT_PAGE_SIZE &&
-        !vmm_translate(user_space, kernel_rsp_probe - TWILIGHT_PAGE_SIZE, &translated, &flags)) {
-        trace_user("preflight failed: lower kernel stack page missing from user CR3");
-        goto cleanup;
-    }
-    trace_user("kernel text/stack visible in user CR3");
+    trace_user("user mappings and shared kernel transition code passed preflight");
 
     probe_ping_seen = false;
     probe_exit_seen = false;
 
-    trace_user("switching to user CR3");
-    if (!vmm_switch_address_space(user_space)) {
-        trace_user("CR3 switch rejected");
-        goto cleanup;
-    }
-    returned_to_kernel_space = false;
-    trace_user("user CR3 active; entering CPL3 with IRETQ");
-
+    /* The assembly helper owns the CR3 switch and uses a dedicated upper-half
+     * kernel transition stack. C never executes on the user CR3. */
     const uint64_t user_stack_top = USER_TEST_STACK_VA + TWILIGHT_PAGE_SIZE - 16ull;
-    user_mode_enter(USER_TEST_CODE_VA, user_stack_top);
+    trace_user("entering assembly CR3/CPL3 transition");
+    user_mode_enter(USER_TEST_CODE_VA,
+                    user_stack_top,
+                    user_space,
+                    kernel_space);
+    trace_user("returned to kernel CR3 from CPL3 exit trap");
 
-    trace_user("returned from CPL3 exit trap; restoring kernel CR3");
-    /* user_mode_enter() returns in CPL0 but deliberately leaves the test CR3
-     * active. Restore the kernel address space before reclaiming user tables. */
-    if (!vmm_switch_address_space(kernel_space)) {
-        /* Kernel upper-half mappings are still shared, so the caller can panic
-         * safely, but destroying the currently active user CR3 would be unsafe. */
-        trace_user("FATAL: could not restore kernel CR3");
+    if (vmm_current_space() != kernel_space) {
+        trace_user("FATAL: assembly returned with wrong CR3");
         return false;
     }
-    returned_to_kernel_space = true;
 
     if (!probe_ping_seen || !probe_exit_seen) {
         trace_user("syscall ping/exit markers were not both observed");
@@ -237,10 +221,6 @@ bool user_mode_self_test(void) {
     success = true;
 
 cleanup:
-    if (!returned_to_kernel_space && vmm_current_space() != kernel_space) {
-        if (!vmm_switch_address_space(kernel_space)) return false;
-    }
-
     if (user_space != VMM_INVALID_SPACE) {
         if (code_mapped) {
             uint64_t old_phys = 0;
