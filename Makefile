@@ -30,6 +30,7 @@ CFLAGS := \
 	-O2 \
 	-Wall -Wextra -Wpedantic \
 	-ffreestanding \
+	-fno-builtin \
 	-fno-stack-protector \
 	-fno-stack-check \
 	-fno-lto \
