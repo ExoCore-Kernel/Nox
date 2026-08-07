@@ -26,6 +26,8 @@ static inline const char *dev_name(const struct device *dev) {
     return (dev != 0 && dev->init_name != 0) ? dev->init_name : "device";
 }
 
+#define dev_printk(level, dev, format, ...) \
+    printk(level "%s: " format, dev_name(dev), ##__VA_ARGS__)
 #define dev_err(dev, format, ...) \
     printk("[linux:error] %s: " format, dev_name(dev), ##__VA_ARGS__)
 #define dev_warn(dev, format, ...) \
