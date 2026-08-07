@@ -49,8 +49,8 @@ void idt_init(void) {
         idt_set_gate((uint8_t)i, (void (*)(void))exception_stub_table[i]);
     }
 
-    idt_set_gate(0x20, irq0_stub); /* PIT */
-    idt_set_gate(0x21, irq1_stub); /* PS/2 keyboard */
+    idt_set_gate(0x20, irq0_stub);
+    idt_set_gate(0x21, irq1_stub);
 
     const struct idtr descriptor = {
         .limit = (uint16_t)(sizeof(idt) - 1),
@@ -69,8 +69,22 @@ void pic_init(void) {
     outb(0x21, 0x01); io_wait();
     outb(0xa1, 0x01); io_wait();
 
-    outb(0x21, 0xfcu); /* unmask IRQ0 + IRQ1 */
+    outb(0x21, 0xfeu); /* IRQ0 only; IRQ1 stays masked until PS/2 init succeeds */
     outb(0xa1, 0xffu);
+}
+
+void pic_mask_irq(uint8_t irq) {
+    const uint16_t port = irq < 8u ? 0x21u : 0xa1u;
+    const uint8_t bit = (uint8_t)(irq & 7u);
+    const uint8_t mask = inb(port);
+    outb(port, (uint8_t)(mask | (uint8_t)(1u << bit)));
+}
+
+void pic_unmask_irq(uint8_t irq) {
+    const uint16_t port = irq < 8u ? 0x21u : 0xa1u;
+    const uint8_t bit = (uint8_t)(irq & 7u);
+    const uint8_t mask = inb(port);
+    outb(port, (uint8_t)(mask & (uint8_t)~(1u << bit)));
 }
 
 void pic_send_eoi(uint8_t irq) {
