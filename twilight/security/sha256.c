@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -151,4 +152,22 @@ void sha256(const void *data, size_t size, uint8_t digest[SHA256_DIGEST_SIZE]) {
     sha256_init(&context);
     sha256_update(&context, data, size);
     sha256_final(&context, digest);
+}
+
+bool sha256_self_test(void) {
+    static const uint8_t expected[SHA256_DIGEST_SIZE] = {
+        0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea,
+        0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+        0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+        0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+    };
+    uint8_t digest[SHA256_DIGEST_SIZE];
+    sha256("abc", 3u, digest);
+
+    uint8_t difference = 0;
+    for (size_t i = 0; i < SHA256_DIGEST_SIZE; ++i) {
+        difference |= (uint8_t)(digest[i] ^ expected[i]);
+        ((volatile uint8_t *)digest)[i] = 0;
+    }
+    return difference == 0;
 }
