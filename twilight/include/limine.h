@@ -18,6 +18,7 @@
 #define LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x4b161536e598651e, 0xb390ad4a2f1f303a }
 #define LIMINE_HHDM_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x48dcf1cb8ad2b852, 0x63984e959a98244b }
 #define LIMINE_MEMMAP_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x67cf3d9d378a806f, 0xe304acdfc50c3c62 }
+#define LIMINE_RSDP_REQUEST_ID { LIMINE_COMMON_MAGIC, 0xc5e77b6b397e7b43, 0x27637845accdcf3c }
 
 #define LIMINE_MEMMAP_USABLE 0
 #define LIMINE_MEMMAP_RESERVED 1
@@ -56,6 +57,17 @@ struct limine_memmap_request {
     uint64_t id[4];
     uint64_t revision;
     struct limine_memmap_response *response;
+};
+
+struct limine_rsdp_response {
+    uint64_t revision;
+    void *address;
+};
+
+struct limine_rsdp_request {
+    uint64_t id[4];
+    uint64_t revision;
+    struct limine_rsdp_response *response;
 };
 
 struct limine_video_mode {
