@@ -10,6 +10,12 @@
 #define EXPORT_SYMBOL_GPL(symbol)
 #define EXPORT_SYMBOL(symbol)
 
+/* Built-in Twilight drivers have no load-time module parameter parser yet.
+ * Keep the declarations source-compatible and retain their compiled defaults. */
+#define module_param(name, type, permissions)
+#define module_param_named(name, value, type, permissions)
+#define module_param_array(name, type, nump, permissions)
+
 #define THIS_MODULE ((void *)0)
 
 #define __init
