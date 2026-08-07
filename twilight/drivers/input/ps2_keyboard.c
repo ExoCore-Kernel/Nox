@@ -7,6 +7,7 @@
 #include <twilight/interrupts.h>
 #include <twilight/io.h>
 #include <twilight/keyboard.h>
+#include <twilight/log.h>
 
 #define PS2_DATA_PORT 0x60u
 #define PS2_STATUS_PORT 0x64u
@@ -25,6 +26,7 @@ static bool left_shift;
 static bool right_shift;
 static bool caps_lock;
 static bool extended_prefix;
+static bool console_attached;
 static size_t cursor_x;
 static size_t cursor_y;
 static size_t line_start_x;
@@ -65,17 +67,25 @@ static void flush_output(void) {
     }
 }
 
+static void attach_console_if_needed(void) {
+    if (console_attached) return;
+    line_start_x = 48u;
+    cursor_x = line_start_x;
+    cursor_y = klog_next_console_y();
+    console_attached = true;
+}
+
 static void console_newline(void) {
+    attach_console_if_needed();
     cursor_x = line_start_x;
     cursor_y += font_height() + 2u;
     if (cursor_y + font_height() >= framebuffer_height()) {
-        cursor_y = 300u;
-        framebuffer_fill_rect(0, cursor_y, framebuffer_width(), framebuffer_height() - cursor_y,
-                              BG_R, BG_G, BG_B);
+        cursor_y = klog_next_console_y();
     }
 }
 
 static void console_backspace(void) {
+    attach_console_if_needed();
     const size_t w = font_width();
     const size_t h = font_height();
     if (w == 0 || cursor_x <= line_start_x) return;
@@ -84,6 +94,8 @@ static void console_backspace(void) {
 }
 
 static void console_putc(char c) {
+    attach_console_if_needed();
+
     const size_t w = font_width();
     const size_t h = font_height();
     if (w == 0 || h == 0) return;
@@ -120,10 +132,10 @@ bool ps2_keyboard_init(void) {
     right_shift = false;
     caps_lock = false;
     extended_prefix = false;
-
+    console_attached = false;
     line_start_x = 48u;
     cursor_x = line_start_x;
-    cursor_y = 300u;
+    cursor_y = 0u;
 
     flush_output();
 
