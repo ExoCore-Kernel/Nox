@@ -9,7 +9,7 @@
 #include <twilight/timer.h>
 
 #define LOG_X 32u
-#define LOG_TOP 32u
+#define LOG_TOP 40u
 #define LOG_BG_R 12u
 #define LOG_BG_G 12u
 #define LOG_BG_B 18u
@@ -20,42 +20,6 @@
 static size_t log_y;
 static bool uptime_enabled;
 
-static void append_char(char *buffer, size_t *index, size_t capacity, char c) {
-    if (*index + 1u >= capacity) return;
-    buffer[(*index)++] = c;
-    buffer[*index] = '\0';
-}
-
-static void append_u64_padded(char *buffer, size_t *index, size_t capacity,
-                              uint64_t value, unsigned width, char pad) {
-    char temp[24];
-    unsigned n = 0;
-    do {
-        temp[n++] = (char)('0' + (value % 10u));
-        value /= 10u;
-    } while (value != 0 && n < sizeof(temp));
-
-    while (n < width) {
-        append_char(buffer, index, capacity, pad);
-        --width;
-    }
-    while (n > 0) append_char(buffer, index, capacity, temp[--n]);
-}
-
-static void format_prefix(char out[32]) {
-    const uint64_t us = uptime_enabled ? timer_uptime_us() : 0;
-    const uint64_t seconds = us / 1000000ull;
-    const uint64_t micros = us % 1000000ull;
-    size_t i = 0;
-
-    append_char(out, &i, 32, '[');
-    append_u64_padded(out, &i, 32, seconds, 5, ' ');
-    append_char(out, &i, 32, '.');
-    append_u64_padded(out, &i, 32, micros, 6, '0');
-    append_char(out, &i, 32, ']');
-    append_char(out, &i, 32, ' ');
-}
-
 void klog_init(void) {
     log_y = LOG_TOP;
     uptime_enabled = false;
@@ -65,11 +29,35 @@ void klog_enable_uptime(void) {
     uptime_enabled = true;
 }
 
+static void draw_prefix(uint8_t red, uint8_t green, uint8_t blue) {
+    /* Safe early prefix: no stack buffers, no formatting helpers. */
+    if (!uptime_enabled) {
+        font_draw_string("[    0.000000] ", LOG_X, log_y, red, green, blue);
+        return;
+    }
+
+    /* Temporary fixed-width uptime rendering, intentionally simple. */
+    const uint64_t us = timer_uptime_us();
+    const uint64_t seconds = us / 1000000ull;
+    const uint64_t micros = us % 1000000ull;
+    char prefix[16] = "[00000.000000]";
+
+    uint64_t s = seconds;
+    for (int i = 5; i >= 1; --i) {
+        prefix[i] = (char)('0' + (s % 10u));
+        s /= 10u;
+    }
+    uint64_t m = micros;
+    for (int i = 12; i >= 7; --i) {
+        prefix[i] = (char)('0' + (m % 10u));
+        m /= 10u;
+    }
+    font_draw_string(prefix, LOG_X, log_y, red, green, blue);
+    font_draw_string(" ", LOG_X + font_width() * 15u, log_y, red, green, blue);
+}
+
 void klog_color(const char *message, uint8_t red, uint8_t green, uint8_t blue) {
     if (message == NULL) return;
-
-    char prefix[32] = {0};
-    format_prefix(prefix);
 
     const size_t line_h = font_height() + 2u;
     if (line_h == 2u) return;
@@ -80,12 +68,11 @@ void klog_color(const char *message, uint8_t red, uint8_t green, uint8_t blue) {
         log_y = LOG_TOP;
     }
 
-    /* Framebuffer is the primary console. Serial mirroring must never block it. */
-    font_draw_string(prefix, LOG_X, log_y, red, green, blue);
-    font_draw_string(message, LOG_X + font_width() * 15u, log_y, red, green, blue);
+    draw_prefix(red, green, blue);
+    font_draw_string(message, LOG_X + font_width() * 16u, log_y, red, green, blue);
     log_y += line_h;
 
-    serial_write(prefix);
+    /* Best-effort serial mirroring after framebuffer output. */
     serial_write(message);
     serial_write("\n");
 }
