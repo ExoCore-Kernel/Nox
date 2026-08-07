@@ -75,7 +75,7 @@ LDFLAGS := \
 	-z max-page-size=0x1000 \
 	-T twilight/linker.ld
 
-.PHONY: all twilight font iso run run-gui run-headless run-q35 run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
+.PHONY: all twilight font iso run run-gui run-headless run-q35 run-driver-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
 
 all: twilight
 
@@ -159,6 +159,10 @@ run-headless: iso
 run-q35: iso
 	@echo "Running Twilight on QEMU q35 (auto display detection; APIC/IOAPIC support still recommended)"
 	@QEMU="$(QEMU)" sh scripts/run-qemu.sh auto q35 $(ISO)
+
+run-driver-test: iso
+	@echo "Running Twilight with QEMU EDU PCI device for Linux-driver compatibility testing"
+	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-device edu" sh scripts/run-qemu.sh auto pc $(ISO)
 
 run-tpm: iso
 	@echo "Running Twilight with persistent emulated TPM 2.0 (CRB frontend)"
