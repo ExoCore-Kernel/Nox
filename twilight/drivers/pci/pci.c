@@ -110,7 +110,7 @@ static void probe_bar(struct twilight_pci_device *device, unsigned index) {
         raw_write32(device->bus, device->slot, device->function, offset, original_low);
 
         const uint32_t size_mask = mask & ~3u;
-        if (size_mask == 0u || size_mask == 0xfffffffcu) return;
+        if (size_mask == 0u) return;
 
         bar->address = (uint64_t)(original_low & ~3u);
         bar->size = (uint64_t)(~size_mask + 1u);
@@ -164,14 +164,14 @@ static void probe_bar(struct twilight_pci_device *device, unsigned index) {
     if (is_64) {
         const uint64_t mask = ((uint64_t)mask_high << 32) |
                               (uint64_t)(mask_low & ~0x0fu);
-        if (mask == 0 || mask == 0xfffffffffffffff0ull) return;
+        if (mask == 0) return;
         bar->address = ((uint64_t)original_high << 32) |
                        (uint64_t)(original_low & ~0x0fu);
         bar->size = ~mask + 1ull;
         bar->flags = TWILIGHT_PCI_BAR_MEM64;
     } else {
         const uint32_t size_mask = mask_low & ~0x0fu;
-        if (size_mask == 0u || size_mask == 0xfffffff0u) return;
+        if (size_mask == 0u) return;
         bar->address = (uint64_t)(original_low & ~0x0fu);
         bar->size = (uint64_t)(~size_mask + 1u);
         bar->flags = 0;
