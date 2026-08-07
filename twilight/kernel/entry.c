@@ -1,19 +1,26 @@
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include <limine.h>
+#include <twilight/acpi.h>
 #include <twilight/apic.h>
 #include <twilight/font.h>
 #include <twilight/font_blob.h>
 #include <twilight/framebuffer.h>
+#include <twilight/gdt.h>
 #include <twilight/heap.h>
 #include <twilight/interrupts.h>
 #include <twilight/keyboard.h>
+#include <twilight/linux_compat.h>
 #include <twilight/log.h>
+#include <twilight/mmio.h>
 #include <twilight/panic.h>
 #include <twilight/pmm.h>
 #include <twilight/serial.h>
 #include <twilight/timer.h>
+#include <twilight/tpm.h>
+#include <twilight/user.h>
 #include <twilight/version.h>
 #include <twilight/vmm.h>
 
@@ -35,6 +42,14 @@
 
 #ifndef TWILIGHT_HEAP_SELF_TEST
 #define TWILIGHT_HEAP_SELF_TEST 1
+#endif
+
+#ifndef TWILIGHT_USERMODE_SELF_TEST
+#define TWILIGHT_USERMODE_SELF_TEST 1
+#endif
+
+#ifndef TWILIGHT_LINUX_COMPAT_SELF_TEST
+#define TWILIGHT_LINUX_COMPAT_SELF_TEST 1
 #endif
 
 __attribute__((used, section(".limine_requests_start")))
@@ -67,6 +82,13 @@ static volatile struct limine_memmap_request memmap_request = {
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_hhdm_request hhdm_request = {
     .id = LIMINE_HHDM_REQUEST_ID,
+    .revision = 0,
+    .response = 0,
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_rsdp_request rsdp_request = {
+    .id = LIMINE_RSDP_REQUEST_ID,
     .revision = 0,
     .response = 0,
 };
@@ -200,6 +222,76 @@ static void log_heap_stats(void) {
     klog_parts(parts, sizeof(parts) / sizeof(parts[0]));
 }
 
+static void initialize_acpi(void) {
+    if (rsdp_request.response == 0 || rsdp_request.response->address == 0) {
+        trace("ACPI RSDP unavailable");
+        klog("ACPI RSDP unavailable; firmware table discovery limited");
+        return;
+    }
+
+    if (!acpi_init(rsdp_request.response->address)) {
+        trace("ACPI table validation failed");
+        klog("ACPI tables were supplied but failed validation");
+        return;
+    }
+
+    trace("ACPI tables initialized");
+    klog("ACPI RSDT/XSDT discovery initialized");
+}
+
+static void initialize_tpm_security(void) {
+    trace("probing TPM 2.0 security");
+    if (!tpm_init()) {
+        trace("TPM initialization returned failure");
+        klog("TPM 2.0 initialization failed; TPM-backed kernel vault unavailable");
+        return;
+    }
+
+    struct tpm_status tpm;
+    tpm_get_status(&tpm);
+
+    if (!tpm.detected) {
+        trace("TPM 2.0 not detected");
+        klog("TPM 2.0 not detected; TPM-backed kernel vault unavailable");
+        return;
+    }
+
+    char start_method[32];
+    u64_to_decimal(tpm.start_method, start_method);
+
+    if (!tpm.transport_ready) {
+        const char *parts[] = {
+            "TPM 2.0 detected (ACPI start method ", start_method,
+            "), but a supported CRB transport is unavailable"
+        };
+        klog_parts(parts, sizeof(parts) / sizeof(parts[0]));
+        trace("TPM detected but CRB transport unavailable");
+        return;
+    }
+
+    klog("TPM 2.0 CRB transport ready");
+
+    if (!tpm.vault_ready) {
+        char response_code[32];
+        u64_to_decimal(tpm.last_response_code, response_code);
+        const char *parts[] = {
+            "TPM transport works, but TPM-resident AES vault creation failed; response code ",
+            response_code
+        };
+        klog_parts(parts, sizeof(parts) / sizeof(parts[0]));
+        trace("TPM AES vault unavailable");
+        return;
+    }
+
+    trace("running TPM kernel vault self-test");
+    if (!tpm_vault_self_test()) {
+        kernel_panic("TPM-backed kernel vault self-test failed");
+    }
+    trace("TPM kernel vault self-test passed");
+    klog("TPM-backed per-boot kernel vault active: AES key remains inside TPM");
+    klog("TPM vault v1 provides confidentiality; persistent PCR sealing and authentication are not enabled yet");
+}
+
 #if TWILIGHT_SCROLL_SELF_TEST
 static void framebuffer_scroll_self_test(void) {
     trace("starting framebuffer scroll self-test");
@@ -327,13 +419,47 @@ void kmain(void) {
     klog("Heap self-test passed: slab, calloc, realloc, large pages and leak checks");
 #endif
 
+    trace("initializing MMIO mapper");
+    if (!mmio_init()) {
+        kernel_panic("Kernel MMIO mapper initialization failed");
+    }
+    trace("MMIO mapper initialized");
+    klog("MMIO mapper initialized for cache-disabled device mappings");
+
+    initialize_acpi();
+
+#if TWILIGHT_LINUX_COMPAT_SELF_TEST
+    trace("running Linux compatibility self-test");
+    if (!linux_compat_self_test()) {
+        kernel_panic("Linux compatibility layer self-test failed");
+    }
+    trace("Linux compatibility self-test passed");
+    klog("Linux compatibility layer ready: types, list, slab, printk and MMIO basics");
+#endif
+
+    trace("initializing x86_64 GDT and TSS");
+    if (!gdt_init()) {
+        kernel_panic("x86_64 GDT/TSS initialization failed");
+    }
+    trace("GDT and TSS initialized");
+    klog("x86_64 GDT/TSS initialized: ring 0 and ring 3 segments ready");
+
 #if TWILIGHT_PANIC_SELF_TEST
     kernel_panic("Panic self-test: renderer is working");
 #endif
 
     idt_init();
     trace("IDT initialized");
-    klog("IDT initialized");
+    klog("IDT initialized; DPL3 int 0x80 syscall gate installed");
+
+#if TWILIGHT_USERMODE_SELF_TEST
+    trace("entering ring 3 self-test");
+    if (!user_mode_self_test()) {
+        kernel_panic("Ring 3 privilege transition self-test failed");
+    }
+    trace("ring 3 self-test passed");
+    klog("Ring 3 transition passed: CPL3 -> int80 -> CPL0 -> CPL3 -> kernel");
+#endif
 
     if (apic_disable_for_legacy_pic()) {
         trace("local APIC disabled");
@@ -403,6 +529,10 @@ void kmain(void) {
     klog_enable_uptime();
     klog("PIT IRQ0 active; uptime clock running");
     klog_heartbeat_enable();
+
+    /* TPM CRB command timeouts use the PIT clock, so probe only after IRQ0 is
+     * confirmed alive. Absence/unsupported transport is intentionally nonfatal. */
+    initialize_tpm_security();
 
 #if TWILIGHT_SCROLL_SELF_TEST
     framebuffer_scroll_self_test();
