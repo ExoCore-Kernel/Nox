@@ -68,3 +68,7 @@ static inline char *print_mac(char *buffer, const u8 *address) {
     buffer[17] = '\0';
     return buffer;
 }
+
+/* Enough for the driver's low-memory warning path; a real token-bucket rate
+ * limiter can replace this when the logging subsystem grows one. */
+static inline int net_ratelimit(void) { return 1; }
