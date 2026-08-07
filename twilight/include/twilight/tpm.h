@@ -12,6 +12,7 @@ struct tpm_status {
     bool transport_ready;
     bool root_of_trust_established;
     bool pcr_policy_bound;
+    bool persistent_hierarchy;
     bool vault_ready;
     bool integrity_failure;
     uint32_t start_method;
@@ -38,17 +39,21 @@ bool tpm_get_random(void *buffer, size_t size);
  * policy. Twilight extends those into PCR 11 and PCR 12 and binds its TPM
  * vault keys to PCR 7+11+12. PCR 7 remains firmware-owned and normally
  * reflects the platform Secure Boot policy on UEFI systems.
+ *
+ * Twilight first attempts to root the policy keys in the TPM Storage/Owner
+ * hierarchy, allowing the same measured state to recreate the same primary
+ * keys across reboot. If that hierarchy is unavailable, it falls back to the
+ * TPM null hierarchy for per-boot protection.
  */
 bool tpm_establish_root_of_trust(
     const uint8_t kernel_measurement[TPM_SHA256_DIGEST_SIZE],
     const uint8_t security_policy_measurement[TPM_SHA256_DIGEST_SIZE]);
 
 /*
- * Authenticated, PCR-policy-bound per-boot kernel secret protection. AES and
- * HMAC key material remains inside the TPM. Objects become unusable if the
- * bound PCR state changes. Current objects are intentionally ephemeral across
- * reboot; persistent sealed storage can be layered on later without weakening
- * this runtime vault.
+ * Authenticated, PCR-policy-bound kernel secret protection. AES and HMAC key
+ * material remains inside the TPM. Objects become unusable if the bound PCR
+ * state changes. Blobs are reboot-persistent only when persistent_hierarchy is
+ * true; otherwise the cryptographic key intentionally dies at TPM reset.
  */
 bool tpm_vault_protect(const void *plaintext,
                        size_t size,
