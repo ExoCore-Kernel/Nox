@@ -11,6 +11,8 @@
 #define PS2_DATA_PORT 0x60u
 #define PS2_STATUS_PORT 0x64u
 #define PS2_COMMAND_PORT 0x64u
+#define PS2_TIMEOUT 1000000u
+#define PS2_ACK 0xfau
 
 #define BG_R 12u
 #define BG_G 12u
@@ -43,8 +45,15 @@ static const char shift_keymap[128] = {
 };
 
 static bool wait_input_clear(void) {
-    for (size_t i = 0; i < 1000000; ++i) {
+    for (size_t i = 0; i < PS2_TIMEOUT; ++i) {
         if ((inb(PS2_STATUS_PORT) & 0x02u) == 0) return true;
+    }
+    return false;
+}
+
+static bool wait_output_full(void) {
+    for (size_t i = 0; i < PS2_TIMEOUT; ++i) {
+        if ((inb(PS2_STATUS_PORT) & 0x01u) != 0) return true;
     }
     return false;
 }
@@ -60,7 +69,7 @@ static void console_newline(void) {
     cursor_x = line_start_x;
     cursor_y += font_height() + 2u;
     if (cursor_y + font_height() >= framebuffer_height()) {
-        cursor_y = 48u + (font_height() + 2u) * 2u;
+        cursor_y = 48u + (font_height() + 2u) * 6u;
         framebuffer_fill_rect(0, cursor_y, framebuffer_width(), framebuffer_height() - cursor_y,
                               BG_R, BG_G, BG_B);
     }
@@ -114,7 +123,7 @@ bool ps2_keyboard_init(void) {
 
     line_start_x = 48u;
     cursor_x = line_start_x;
-    cursor_y = 48u + (font_height() + 2u) * 2u;
+    cursor_y = 48u + (font_height() + 2u) * 6u;
 
     flush_output();
 
@@ -123,6 +132,9 @@ bool ps2_keyboard_init(void) {
 
     if (!wait_input_clear()) return false;
     outb(PS2_DATA_PORT, 0xf4u); /* keyboard: enable scanning */
+
+    if (!wait_output_full()) return false;
+    if (inb(PS2_DATA_PORT) != PS2_ACK) return false;
 
     return true;
 }
