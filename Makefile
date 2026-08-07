@@ -12,6 +12,7 @@ HEAP_SELF_TEST ?= 1
 USERMODE_SELF_TEST ?= 1
 LINUX_COMPAT_SELF_TEST ?= 1
 SCROLL_SELF_TEST ?= 0
+UPSTREAM_8139 ?= 0
 TPM_STATE_DIR ?= .nox-tpm-state
 TPM_MODE ?= auto
 
@@ -24,14 +25,24 @@ ISO := $(BUILD_DIR)/nox.iso
 LIMINE_DIR := limine-binary
 FONT_C := $(GEN_DIR)/font_blob.c
 VERSION_C := $(GEN_DIR)/version_blob.c
+UPSTREAM_8139_C := $(GEN_DIR)/upstream/8139too.c
+UPSTREAM_8139_O := $(OBJ_DIR)/generated/upstream/8139too.o
 
 C_SOURCES := $(shell find twilight -type f -name '*.c' ! -path 'twilight/src/*' -print)
+ifeq ($(UPSTREAM_8139),1)
+# The strict upstream-driver test compiles Linux's untouched 8139too.c instead
+# of Twilight's compatibility port, so only one driver can claim 10ec:8139.
+C_SOURCES := $(filter-out twilight/drivers/linux/8139too.c,$(C_SOURCES))
+endif
 ASM_SOURCES := $(shell find twilight -type f -name '*.S' -print)
 C_OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(C_SOURCES))
 ASM_OBJECTS := $(patsubst %.S,$(OBJ_DIR)/%.S.o,$(ASM_SOURCES))
 OBJECTS := $(C_OBJECTS) $(ASM_OBJECTS)
 OBJECTS += $(OBJ_DIR)/generated/font_blob.o
 OBJECTS += $(OBJ_DIR)/generated/version_blob.o
+ifeq ($(UPSTREAM_8139),1)
+OBJECTS += $(UPSTREAM_8139_O)
+endif
 
 CFLAGS := \
 	-target x86_64-unknown-none-elf \
@@ -75,7 +86,7 @@ LDFLAGS := \
 	-z max-page-size=0x1000 \
 	-T twilight/linker.ld
 
-.PHONY: all twilight font iso run run-gui run-headless run-q35 run-driver-test run-linux-driver-test run-ethernet-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
+.PHONY: all twilight font iso run run-gui run-headless run-q35 run-driver-test run-linux-driver-test run-ethernet-test run-upstream-ethernet-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
 
 all: twilight
 
@@ -96,6 +107,15 @@ FORCE_VERSION:
 $(VERSION_C): FORCE_VERSION scripts/gen-version.py twilight/build-number.txt
 	@mkdir -p $(GEN_DIR)
 	$(PYTHON) scripts/gen-version.py $@
+
+$(UPSTREAM_8139_C): scripts/fetch-linux-8139too.py
+	@mkdir -p $(dir $@)
+	$(PYTHON) scripts/fetch-linux-8139too.py $@
+
+$(UPSTREAM_8139_O): $(UPSTREAM_8139_C)
+	@mkdir -p $(dir $@)
+	@echo "Compiling exact upstream Linux v2.6.24 8139too.c (source remains unmodified)"
+	$(CC) $(CFLAGS) -DKBUILD_MODNAME=\"8139too\" -c $< -o $@
 
 $(KERNEL): $(OBJECTS) twilight/linker.ld | $(BUILD_DIR)
 	$(LD) $(LDFLAGS) $(OBJECTS) -o $@
@@ -170,6 +190,14 @@ run-linux-driver-test: iso
 
 run-ethernet-test: iso
 	@echo "Running Twilight with QEMU RTL8139 + user-mode Ethernet for Linux 8139too bring-up"
+	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-netdev user,id=noxnet -device rtl8139,netdev=noxnet,mac=52:54:00:12:34:56" sh scripts/run-qemu.sh auto pc $(ISO)
+
+# Strict compatibility test: recursive make reparses this file with
+# UPSTREAM_8139=1, excludes Twilight's port, fetches/verifies the exact Linux
+# v2.6.24 Git blob, and compiles that source byte-for-byte unchanged.
+run-upstream-ethernet-test:
+	@$(MAKE) UPSTREAM_8139=1 iso
+	@echo "Running Twilight with UNMODIFIED upstream Linux v2.6.24 8139too.c"
 	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-netdev user,id=noxnet -device rtl8139,netdev=noxnet,mac=52:54:00:12:34:56" sh scripts/run-qemu.sh auto pc $(ISO)
 
 run-tpm: iso
