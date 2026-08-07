@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include <twilight/cpu_security.h>
+#include <twilight/log.h>
 
 #define CR0_WRITE_PROTECT (1ull << 16)
 #define CR4_PCE           (1ull << 8)
@@ -62,7 +63,7 @@ bool cpu_security_init(void) {
     cpuid(0, 0, &max_leaf, &ignored_b, &ignored_c, &ignored_d);
 
     uint64_t cr4 = read_cr4();
-    cr4 &= ~CR4_PCE; /* RDPMC remains privileged. */
+    cr4 &= ~CR4_PCE;
 
     if (max_leaf >= 7u) {
         uint32_t eax, ebx, ecx, edx;
@@ -82,6 +83,13 @@ bool cpu_security_init(void) {
     status.umip = (active & CR4_UMIP) != 0;
 
     initialized = true;
+    klog("CPU security: CR0.WP enabled; user RDPMC disabled");
+    if (status.smep) klog("CPU security: SMEP enabled (kernel cannot execute user pages)");
+    else klog("CPU security: SMEP unavailable on this CPU");
+    if (status.smap) klog("CPU security: SMAP enabled (kernel user-memory access requires explicit override)");
+    else klog("CPU security: SMAP unavailable on this CPU");
+    if (status.umip) klog("CPU security: UMIP enabled (sensitive descriptor-table instructions blocked in Ring 3)");
+    else klog("CPU security: UMIP unavailable on this CPU");
     return true;
 }
 
