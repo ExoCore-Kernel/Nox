@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -16,3 +17,4 @@ void sha256_init(struct sha256_context *context);
 void sha256_update(struct sha256_context *context, const void *data, size_t size);
 void sha256_final(struct sha256_context *context, uint8_t digest[SHA256_DIGEST_SIZE]);
 void sha256(const void *data, size_t size, uint8_t digest[SHA256_DIGEST_SIZE]);
+bool sha256_self_test(void);
