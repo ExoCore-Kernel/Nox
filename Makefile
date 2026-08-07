@@ -57,7 +57,7 @@ LDFLAGS := \
 	-z max-page-size=0x1000 \
 	-T twilight/linker.ld
 
-.PHONY: all twilight font iso run limine clean check-tools new-it FORCE_VERSION
+.PHONY: all twilight font iso run run-q35 limine clean check-tools new-it FORCE_VERSION
 
 all: twilight
 
@@ -128,6 +128,12 @@ iso: check-tools $(KERNEL) limine
 
 run: iso
 	@command -v $(QEMU) >/dev/null || { echo "Missing $(QEMU)"; exit 1; }
+	@echo "Running Twilight on QEMU pc/i440FX (legacy 8259 PIC bring-up target)"
+	$(QEMU) -M pc -m 512M -cdrom $(ISO) -serial stdio -no-reboot -no-shutdown
+
+run-q35: iso
+	@command -v $(QEMU) >/dev/null || { echo "Missing $(QEMU)"; exit 1; }
+	@echo "Running Twilight on QEMU q35 (requires APIC/IOAPIC support for reliable hardware IRQ routing)"
 	$(QEMU) -M q35 -m 512M -cdrom $(ISO) -serial stdio -no-reboot -no-shutdown
 
 check-tools:
