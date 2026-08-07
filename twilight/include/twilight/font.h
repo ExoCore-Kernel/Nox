@@ -5,5 +5,9 @@
 #include <stdint.h>
 
 bool font_init(const void *data, size_t size);
+void font_draw_char(char c, size_t x, size_t y,
+                    uint8_t red, uint8_t green, uint8_t blue);
 void font_draw_string(const char *text, size_t x, size_t y,
                       uint8_t red, uint8_t green, uint8_t blue);
+size_t font_width(void);
+size_t font_height(void);
