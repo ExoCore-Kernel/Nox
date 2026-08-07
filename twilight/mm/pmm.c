@@ -19,6 +19,7 @@ static uint64_t metadata_pages_count;
 static uint64_t reported_bytes_count;
 static uint64_t usable_bytes_count;
 static uint64_t highest_physical_address;
+static uint64_t managed_physical_limit;
 static uint64_t direct_map_offset;
 static uint64_t allocation_hint;
 static uint64_t metadata_phys_start;
@@ -134,24 +135,32 @@ bool pmm_init(const struct limine_memmap_response *memory_map, uint64_t hhdm_off
     reported_bytes_count = 0;
     usable_bytes_count = 0;
     highest_physical_address = 0;
+    managed_physical_limit = 0;
 
+    /*
+     * Keep diagnostics for the complete Limine map, but size allocator metadata
+     * only from the highest page Twilight can actually allocate. Firmware maps
+     * often contain very high MMIO/reserved ranges; covering those holes with a
+     * dense bitmap wasted tens of MiB on otherwise tiny machines.
+     */
     for (uint64_t i = 0; i < memory_map->entry_count; ++i) {
         const struct limine_memmap_entry *entry = memory_map->entries[i];
         if (entry == 0 || entry->length == 0) continue;
 
         reported_bytes_count = saturating_add(reported_bytes_count, entry->length);
-        if (entry->type == LIMINE_MEMMAP_USABLE) {
-            usable_bytes_count = saturating_add(usable_bytes_count, entry->length);
-        }
-
         const uint64_t end = saturating_add(entry->base, entry->length);
         if (end > highest_physical_address) highest_physical_address = end;
+
+        if (entry->type == LIMINE_MEMMAP_USABLE) {
+            usable_bytes_count = saturating_add(usable_bytes_count, entry->length);
+            if (end > managed_physical_limit) managed_physical_limit = end;
+        }
     }
 
-    if (highest_physical_address == 0) return false;
+    if (managed_physical_limit == 0) return false;
 
-    page_count = highest_physical_address / TWILIGHT_PAGE_SIZE;
-    if ((highest_physical_address % TWILIGHT_PAGE_SIZE) != 0) ++page_count;
+    page_count = managed_physical_limit / TWILIGHT_PAGE_SIZE;
+    if ((managed_physical_limit % TWILIGHT_PAGE_SIZE) != 0) ++page_count;
     if (page_count == 0) return false;
 
     bitmap_bytes = page_count / 8ull;
@@ -192,7 +201,6 @@ bool pmm_init(const struct limine_memmap_response *memory_map, uint64_t hhdm_off
     usable_bitmap = used_bitmap + bitmap_bytes;
     pinned_bitmap = usable_bitmap + bitmap_bytes;
 
-    for (uint64_t i = 0; i < raw_metadata_bytes; ++i) used_bitmap[i] = 0;
     for (uint64_t i = 0; i < bitmap_bytes; ++i) {
         used_bitmap[i] = 0xffu;
         usable_bitmap[i] = 0x00u;
