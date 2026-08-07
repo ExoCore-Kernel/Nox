@@ -4,6 +4,8 @@
 
 #include <linux/if_ether.h>
 #include <linux/netdevice.h>
+#include <linux/spinlock.h>
+#include <linux/workqueue.h>
 
 static inline void ether_addr_copy(u8 *destination, const u8 *source) {
     for (unsigned int i = 0; i < ETH_ALEN; ++i) destination[i] = source[i];
