@@ -18,10 +18,14 @@ SECTIONS {
     } :limine_requests
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
+    __twilight_text_start = .;
     .text : { *(.text .text.*) } :text
+    __twilight_text_end = .;
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
+    __twilight_rodata_start = .;
     .rodata : { *(.rodata .rodata.*) } :rodata
+    __twilight_rodata_end = .;
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
     .data : { *(.data .data.*) } :data
