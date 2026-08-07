@@ -41,9 +41,7 @@ __attribute__((used, section(".limine_requests_end")))
 static volatile uint64_t limine_requests_end[] = LIMINE_REQUESTS_END_MARKER;
 
 static __attribute__((noreturn)) void halt_forever(void) {
-    for (;;) {
-        __asm__ volatile ("hlt");
-    }
+    for (;;) __asm__ volatile ("hlt");
 }
 
 static __attribute__((noreturn)) void fatal_halt(void) {
@@ -51,94 +49,61 @@ static __attribute__((noreturn)) void fatal_halt(void) {
     halt_forever();
 }
 
-static void checkpoint(const char *text, uint64_t line) {
-    font_draw_string(text, 32, 16 + line * (font_height() + 2u), 235, 235, 235);
-}
-
 void kmain(void) {
     interrupts_disable();
     (void)serial_init();
 
-    if (!LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision)) {
-        fatal_halt();
-    }
+    if (!LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision)) fatal_halt();
 
     struct limine_framebuffer_response *response = framebuffer_request.response;
-    if (response == 0 || response->framebuffer_count == 0 || response->framebuffers == 0) {
-        fatal_halt();
-    }
-
-    if (!framebuffer_init(response->framebuffers[0])) {
-        fatal_halt();
-    }
+    if (response == 0 || response->framebuffer_count == 0 || response->framebuffers == 0) fatal_halt();
+    if (!framebuffer_init(response->framebuffers[0])) fatal_halt();
 
     framebuffer_clear(12, 12, 18);
-
-    if (!font_init(twilight_console_font, twilight_console_font_size)) {
-        fatal_halt();
-    }
-
-    checkpoint("Twilight booting...", 0);
-    checkpoint("A: before cmdline response", 1);
+    if (!font_init(twilight_console_font, twilight_console_font_size)) fatal_halt();
 
     const char *cmdline = 0;
-    if (cmdline_request.response != 0) {
-        checkpoint("B: cmdline response present", 2);
-        cmdline = cmdline_request.response->cmdline;
-        checkpoint("C: cmdline pointer read", 3);
-    } else {
-        checkpoint("B: no cmdline response", 2);
-    }
-
+    if (cmdline_request.response != 0) cmdline = cmdline_request.response->cmdline;
     const char *os_name = twilight_os_name_from_cmdline(cmdline);
-    (void)os_name;
-    checkpoint("D: OS name parsed", 4);
 
     klog_init();
-    checkpoint("E: klog_init returned", 5);
+    twilight_print_version_banner(os_name);
+    klog("Framebuffer initialized");
+    klog("Console font initialized");
 
-    checkpoint("F: entering IDT init", 6);
+#if TWILIGHT_PANIC_SELF_TEST
+    kernel_panic("Panic self-test: renderer is working");
+#endif
+
     idt_init();
-    checkpoint("G: IDT initialized", 7);
+    klog("IDT initialized");
 
     if (apic_disable_for_legacy_pic()) {
-        checkpoint("H0: local APIC disabled", 8);
+        klog("Local APIC disabled for legacy PIC bring-up");
     } else {
-        checkpoint("H0: APIC not present", 8);
+        klog("Local APIC not present; using legacy PIC");
     }
 
     pic_init();
-    checkpoint("H1: PIC initialized", 9);
+    klog("8259 PIC initialized; IRQ0 unmasked, IRQ1 masked");
 
     pit_init(1000u);
-    checkpoint("I: PIT configured", 10);
+    klog("PIT configured for 1000 Hz uptime clock");
 
     interrupts_enable();
-    checkpoint("J: interrupts enabled", 11);
+    while (timer_ticks() == 0) __asm__ volatile ("hlt");
 
-    const uint64_t before_soft_irq = timer_ticks();
-    __asm__ volatile ("int $0x20");
-    if (timer_ticks() > before_soft_irq) {
-        checkpoint("K0: software IRQ0 path works", 12);
-    } else {
-        checkpoint("K0: software IRQ0 path FAILED", 12);
-        halt_forever();
-    }
+    klog_enable_uptime();
+    klog("PIT IRQ0 active; uptime clock running");
 
-    const uint64_t after_soft_irq = timer_ticks();
-    while (timer_ticks() == after_soft_irq) {
-        __asm__ volatile ("hlt");
-    }
-    checkpoint("K1: hardware PIT IRQ0 received", 13);
-
+    klog("Initializing PS/2 keyboard");
     if (!ps2_keyboard_init()) {
-        checkpoint("L: PS/2 init failed", 14);
         kernel_panic("PS/2 keyboard initialization failed or timed out");
     }
-    checkpoint("L: PS/2 ACK received", 14);
+    klog("PS/2 keyboard ACK received");
 
     pic_unmask_irq(1);
-    checkpoint("M: keyboard IRQ1 enabled", 15);
+    klog("PS/2 keyboard IRQ1 enabled; type below");
 
     halt_forever();
 }
