@@ -28,9 +28,9 @@ exception_stub_\n:
 
 exception_common:
     cli
-    movq 0(%rsp), %rdi      /* vector */
-    movq 8(%rsp), %rsi      /* error code */
-    movq 16(%rsp), %rdx     /* RIP */
+    movq 0(%rsp), %rdi
+    movq 8(%rsp), %rsi
+    movq 16(%rsp), %rdx
     andq $-16, %rsp
     call kernel_panic_exception
 1:
@@ -78,9 +78,10 @@ default_interrupt_stub:
     jmp exception_common
 .size default_interrupt_stub, .-default_interrupt_stub
 
-.global irq1_stub
-.type irq1_stub, @function
-irq1_stub:
+.macro IRQ_STUB name, handler
+.global \name
+.type \name, @function
+\name:
     pushq %rax
     pushq %rbx
     pushq %rcx
@@ -99,7 +100,7 @@ irq1_stub:
 
     movq %rsp, %r15
     andq $-16, %rsp
-    call keyboard_irq_handler
+    call \handler
     movq %r15, %rsp
 
     popq %r15
@@ -118,7 +119,11 @@ irq1_stub:
     popq %rbx
     popq %rax
     iretq
-.size irq1_stub, .-irq1_stub
+.size \name, .-\name
+.endm
+
+IRQ_STUB irq0_stub, pit_irq_handler
+IRQ_STUB irq1_stub, keyboard_irq_handler
 
 .section .rodata
 .global exception_stub_table
