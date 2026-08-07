@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include <linux/device.h>
+#include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <linux/io.h>
 #include <linux/types.h>
