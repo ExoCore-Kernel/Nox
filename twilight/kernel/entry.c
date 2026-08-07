@@ -96,6 +96,57 @@ static void u64_to_decimal(uint64_t value, char out[32]) {
     out[i] = '\0';
 }
 
+static void spin_pause(uint64_t iterations) {
+    for (volatile uint64_t i = 0; i < iterations; ++i) {
+        __asm__ volatile ("pause");
+    }
+}
+
+static bool wait_for_first_pit_irq(void) {
+    /*
+     * Do not HLT while diagnosing initial interrupt delivery: if routing is
+     * broken, HLT would sleep forever. A bounded PAUSE loop lets serial report
+     * the PIC/PIT state and lets Twilight try the virtual-wire fallback.
+     */
+    for (uint64_t i = 0; i < 10000000ull; ++i) {
+        if (timer_ticks() != 0) return true;
+        __asm__ volatile ("pause");
+    }
+    return timer_ticks() != 0;
+}
+
+static void trace_irq_state(const char *phase) {
+    char mask[32];
+    char irr[32];
+    char isr[32];
+    char pit[32];
+    char ticks[32];
+    char iflag[32];
+
+    u64_to_decimal(pic_master_mask(), mask);
+    u64_to_decimal(pic_master_irr(), irr);
+    u64_to_decimal(pic_master_isr(), isr);
+    u64_to_decimal(pit_read_counter(), pit);
+    u64_to_decimal(timer_ticks(), ticks);
+    u64_to_decimal(interrupts_are_enabled() ? 1u : 0u, iflag);
+
+    serial_write("[serial] IRQ diag ");
+    serial_write(phase);
+    serial_write(": IF=");
+    serial_write(iflag);
+    serial_write(" PIC-mask=");
+    serial_write(mask);
+    serial_write(" IRR=");
+    serial_write(irr);
+    serial_write(" ISR=");
+    serial_write(isr);
+    serial_write(" PIT-count=");
+    serial_write(pit);
+    serial_write(" ticks=");
+    serial_write(ticks);
+    serial_write("\n");
+}
+
 static void log_pmm_stats(void) {
     struct pmm_stats stats;
     char reported_mib[32];
@@ -262,13 +313,57 @@ void kmain(void) {
     trace("8259 PIC initialized");
     klog("8259 PIC initialized; IRQ0 unmasked, IRQ1 masked");
 
+    /* Prove the IDT gate, assembly stub and C IRQ0 handler before hardware IRQs. */
+    trace("testing IRQ0 vector with software INT 0x20");
+    __asm__ volatile ("int $0x20");
+    if (timer_ticks() != 1) {
+        fatal_halt("software IRQ0 vector test did not reach PIT handler");
+    }
+    trace("software IRQ0 vector test passed");
+
+    /* pit_init() resets the diagnostic software tick back to zero. */
     pit_init(1000u);
     trace("PIT configured");
     klog("PIT configured for 1000 Hz uptime clock");
 
+    /* Let the PIT run while IF=0 so a real IRQ0 should latch in the PIC IRR. */
+    const uint16_t pit_before = pit_read_counter();
+    spin_pause(250000u);
+    const uint16_t pit_after = pit_read_counter();
+    if (pit_before == pit_after) {
+        trace("warning: PIT counter did not change during pre-STI probe");
+    } else {
+        trace("PIT counter is running before interrupts are enabled");
+    }
+    trace_irq_state("before STI");
+
     interrupts_enable();
     trace("interrupts enabled; waiting for PIT IRQ0");
-    while (timer_ticks() == 0) __asm__ volatile ("hlt");
+
+    if (!wait_for_first_pit_irq()) {
+        trace_irq_state("direct PIC timeout");
+        interrupts_disable();
+
+        trace("direct PIC delivery failed; trying Local APIC virtual-wire ExtINT fallback");
+        if (!apic_enable_virtual_wire_for_legacy_pic()) {
+            fatal_halt("could not configure Local APIC virtual-wire fallback");
+        }
+
+        /* Start from a clean PIC/PIT state after changing the chipset route. */
+        pic_init();
+        pit_init(1000u);
+        trace_irq_state("virtual-wire configured before STI");
+
+        interrupts_enable();
+        if (!wait_for_first_pit_irq()) {
+            trace_irq_state("virtual-wire timeout");
+            fatal_halt("PIT IRQ0 failed in both direct-PIC and APIC virtual-wire modes");
+        }
+
+        trace("PIT IRQ0 recovered through Local APIC virtual-wire mode");
+        klog("PIT IRQ0 routed through Local APIC virtual-wire compatibility mode");
+    }
+
     trace("first hardware PIT IRQ0 received");
 
     klog_enable_uptime();
