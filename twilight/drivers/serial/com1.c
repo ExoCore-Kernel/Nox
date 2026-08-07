@@ -5,6 +5,7 @@
 #include <twilight/serial.h>
 
 #define COM1 0x3f8u
+#define SERIAL_SPIN_LIMIT 100000u
 
 bool serial_init(void) {
     outb(COM1 + 1u, 0x00u); /* disable UART interrupts */
@@ -18,11 +19,13 @@ bool serial_init(void) {
 }
 
 void serial_write_char(char c) {
-    /* Serial is diagnostic only and must never be able to stall boot. */
-    if ((inb(COM1 + 5u) & 0x20u) == 0) {
-        return;
+    /* Diagnostic output must be reliable, but never able to hang boot forever. */
+    for (uint32_t i = 0; i < SERIAL_SPIN_LIMIT; ++i) {
+        if ((inb(COM1 + 5u) & 0x20u) != 0) {
+            outb(COM1, (uint8_t)c);
+            return;
+        }
     }
-    outb(COM1, (uint8_t)c);
 }
 
 void serial_write(const char *text) {
