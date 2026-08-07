@@ -43,6 +43,19 @@ static void heartbeat_erase(void) {
     heartbeat_visible = false;
 }
 
+static void scroll_one_line(void) {
+    const size_t line_h = line_height();
+    const size_t bottom = log_bottom();
+    if (line_h <= 2u || bottom <= LOG_TOP) return;
+
+    heartbeat_erase();
+    framebuffer_scroll_region_up(LOG_TOP, bottom, line_h,
+                                 LOG_BG_R, LOG_BG_G, LOG_BG_B);
+    if (log_y >= line_h) log_y -= line_h;
+    if (log_y < LOG_TOP) log_y = LOG_TOP;
+    heartbeat_y = log_y;
+}
+
 static void ensure_room_for_line(void) {
     const size_t line_h = line_height();
     const size_t bottom = log_bottom();
@@ -50,14 +63,7 @@ static void ensure_room_for_line(void) {
     if (line_h <= 2u || bottom <= LOG_TOP) return;
 
     while (log_y + line_h + font_height() >= bottom) {
-        heartbeat_erase();
-        framebuffer_scroll_region_up(LOG_TOP, bottom, line_h,
-                                     LOG_BG_R, LOG_BG_G, LOG_BG_B);
-        if (log_y >= line_h) log_y -= line_h;
-        if (log_y < LOG_TOP) {
-            log_y = LOG_TOP;
-            break;
-        }
+        scroll_one_line();
     }
 }
 
@@ -145,7 +151,7 @@ void klog_heartbeat_update(void) {
     }
 
     if (heartbeat_y + font_height() >= bottom) {
-        ensure_room_for_line();
+        scroll_one_line();
         heartbeat_y = log_y;
     }
 
@@ -161,6 +167,22 @@ void klog_heartbeat_update(void) {
 
 size_t klog_next_console_y(void) {
     ensure_room_for_line();
+    heartbeat_y = log_y;
+    return log_y;
+}
+
+size_t klog_console_newline_y(void) {
+    const size_t line_h = line_height();
+    const size_t bottom = log_bottom();
+    if (line_h <= 2u || bottom <= LOG_TOP) return log_y;
+
+    heartbeat_erase();
+    log_y += line_h;
+
+    if (log_y + font_height() >= bottom) {
+        scroll_one_line();
+    }
+
     heartbeat_y = log_y;
     return log_y;
 }
