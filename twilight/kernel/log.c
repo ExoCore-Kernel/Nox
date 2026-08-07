@@ -45,9 +45,8 @@ static void draw_uptime_prefix(uint8_t red, uint8_t green, uint8_t blue) {
     const uint64_t us = timer_uptime_us();
     uint64_t seconds = us / 1000000ull;
     uint64_t micros = us % 1000000ull;
-
-    /* Fixed-width Linux-style prefix. No memset or general formatter is used here. */
     char prefix[16];
+
     prefix[0] = '[';
     prefix[1] = ' ';
     prefix[2] = ' ';
@@ -77,6 +76,13 @@ static void draw_uptime_prefix(uint8_t red, uint8_t green, uint8_t blue) {
     font_draw_string(prefix, LOG_X, log_y, red, green, blue);
 }
 
+static size_t text_width_pixels(const char *text) {
+    if (text == NULL) return 0;
+    size_t chars = 0;
+    while (text[chars] != '\0') ++chars;
+    return chars * font_width();
+}
+
 void klog_init(void) {
     log_y = LOG_TOP;
     uptime_enabled = false;
@@ -84,6 +90,25 @@ void klog_init(void) {
 
 void klog_enable_uptime(void) {
     uptime_enabled = true;
+}
+
+void klog_parts(const char *const *parts, size_t count) {
+    const size_t line_h = font_height() + 2u;
+    if (parts == NULL || line_h <= 2u) return;
+
+    ensure_room_for_line();
+    draw_uptime_prefix(LOG_FG_R, LOG_FG_G, LOG_FG_B);
+
+    size_t x = LOG_X + font_width() * 16u;
+    for (size_t i = 0; i < count; ++i) {
+        const char *part = parts[i];
+        if (part == NULL) continue;
+        font_draw_string(part, x, log_y, LOG_FG_R, LOG_FG_G, LOG_FG_B);
+        x += text_width_pixels(part);
+        serial_write(part);
+    }
+    serial_write("\n");
+    log_y += line_h;
 }
 
 void klog_color(const char *message, uint8_t red, uint8_t green, uint8_t blue) {
@@ -97,7 +122,6 @@ void klog_color(const char *message, uint8_t red, uint8_t green, uint8_t blue) {
     font_draw_string(message, LOG_X + font_width() * 16u, log_y, red, green, blue);
     log_y += line_h;
 
-    /* Serial is best-effort only and cannot block framebuffer output. */
     serial_write(message);
     serial_write("\n");
 }
