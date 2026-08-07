@@ -96,7 +96,6 @@ void kmain(void) {
     klog_init();
     checkpoint("E: klog_init returned", 5);
 
-    /* Deliberately bypass version banner and klog while isolating the freeze. */
     checkpoint("F: entering IDT init", 6);
     idt_init();
     checkpoint("G: IDT initialized", 7);
@@ -110,19 +109,30 @@ void kmain(void) {
     interrupts_enable();
     checkpoint("J: interrupts enabled", 10);
 
-    while (timer_ticks() == 0) {
+    /* Diagnostic: prove the 0x20 IDT gate/stub/handler works independently of hardware IRQ routing. */
+    const uint64_t before_soft_irq = timer_ticks();
+    __asm__ volatile ("int $0x20");
+    if (timer_ticks() > before_soft_irq) {
+        checkpoint("K0: software IRQ0 path works", 11);
+    } else {
+        checkpoint("K0: software IRQ0 path FAILED", 11);
+        halt_forever();
+    }
+
+    const uint64_t after_soft_irq = timer_ticks();
+    while (timer_ticks() == after_soft_irq) {
         __asm__ volatile ("hlt");
     }
-    checkpoint("K: PIT IRQ0 received", 11);
+    checkpoint("K1: hardware PIT IRQ0 received", 12);
 
     if (!ps2_keyboard_init()) {
-        checkpoint("L: PS/2 init failed", 12);
+        checkpoint("L: PS/2 init failed", 13);
         kernel_panic("PS/2 keyboard initialization failed or timed out");
     }
-    checkpoint("L: PS/2 ACK received", 12);
+    checkpoint("L: PS/2 ACK received", 13);
 
     pic_unmask_irq(1);
-    checkpoint("M: keyboard IRQ1 enabled", 13);
+    checkpoint("M: keyboard IRQ1 enabled", 14);
 
     halt_forever();
 }
