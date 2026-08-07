@@ -4,6 +4,7 @@
 
 #include <twilight/font.h>
 #include <twilight/framebuffer.h>
+#include <twilight/linux_compat.h>
 #include <twilight/log.h>
 #include <twilight/serial.h>
 #include <twilight/timer.h>
@@ -62,9 +63,7 @@ static void ensure_room_for_line(void) {
 
     if (line_h <= 2u || bottom <= LOG_TOP) return;
 
-    while (log_y + line_h + font_height() >= bottom) {
-        scroll_one_line();
-    }
+    while (log_y + line_h + font_height() >= bottom) scroll_one_line();
 }
 
 static void draw_uptime_prefix(uint8_t red, uint8_t green, uint8_t blue) {
@@ -136,6 +135,7 @@ void klog_heartbeat_enable(void) {
 }
 
 void klog_heartbeat_update(void) {
+    if (linux_driver_runtime_is_initialized()) linux_driver_runtime_poll();
     if (!heartbeat_enabled || !uptime_enabled) return;
 
     const size_t line_h = line_height();
@@ -179,9 +179,7 @@ size_t klog_console_newline_y(void) {
     heartbeat_erase();
     log_y += line_h;
 
-    if (log_y + font_height() >= bottom) {
-        scroll_one_line();
-    }
+    if (log_y + font_height() >= bottom) scroll_one_line();
 
     heartbeat_y = log_y;
     return log_y;
