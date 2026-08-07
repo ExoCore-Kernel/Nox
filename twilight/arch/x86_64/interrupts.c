@@ -24,6 +24,7 @@ static uint16_t kernel_cs;
 
 extern void default_interrupt_stub(void);
 extern void irq1_stub(void);
+extern void *exception_stub_table[32];
 
 static void idt_set_gate(uint8_t vector, void (*handler)(void)) {
     const uint64_t address = (uint64_t)handler;
@@ -39,13 +40,14 @@ static void idt_set_gate(uint8_t vector, void (*handler)(void)) {
 void idt_init(void) {
     __asm__ volatile ("mov %%cs, %0" : "=r"(kernel_cs));
 
-    /*
-     * Install a valid handler for every vector first. This way any unexpected
-     * CPU exception, NMI, or stray IRQ stops in a controlled halt instead of
-     * entering an empty gate and cascading into a double/triple fault.
-     */
+    /* Every vector is valid before interrupts are enabled. */
     for (size_t i = 0; i < 256; ++i) {
         idt_set_gate((uint8_t)i, default_interrupt_stub);
+    }
+
+    /* CPU exceptions 0..31 get vector-aware panic stubs. */
+    for (size_t i = 0; i < 32; ++i) {
+        idt_set_gate((uint8_t)i, (void (*)(void))exception_stub_table[i]);
     }
 
     /* PIC IRQ1 (keyboard) after remapping the master PIC to 0x20. */
