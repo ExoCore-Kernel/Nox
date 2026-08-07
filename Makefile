@@ -75,7 +75,7 @@ LDFLAGS := \
 	-z max-page-size=0x1000 \
 	-T twilight/linker.ld
 
-.PHONY: all twilight font iso run run-gui run-headless run-q35 run-driver-test run-linux-driver-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
+.PHONY: all twilight font iso run run-gui run-headless run-q35 run-driver-test run-linux-driver-test run-ethernet-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
 
 all: twilight
 
@@ -167,6 +167,10 @@ run-driver-test: iso
 run-linux-driver-test: iso
 	@echo "Running Twilight with QEMU pvpanic-pci and the upstream Linux pvpanic PCI driver"
 	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-device pvpanic-pci" sh scripts/run-qemu.sh auto pc $(ISO)
+
+run-ethernet-test: iso
+	@echo "Running Twilight with QEMU RTL8139 + user-mode Ethernet for Linux 8139too bring-up"
+	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-netdev user,id=noxnet -device rtl8139,netdev=noxnet,mac=52:54:00:12:34:56" sh scripts/run-qemu.sh auto pc $(ISO)
 
 run-tpm: iso
 	@echo "Running Twilight with persistent emulated TPM 2.0 (CRB frontend)"
