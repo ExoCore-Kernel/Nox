@@ -46,7 +46,8 @@ bool linux_compat_self_test(void) {
         sum += node->value;
     }
 
-    const bool ok = sum == 42u && ARRAY_SIZE((uint8_t[]){1, 2, 3, 4}) == 4u;
+    const uint8_t array_probe[] = {1, 2, 3, 4};
+    const bool ok = sum == 42u && ARRAY_SIZE(array_probe) == 4u;
 
     list_del(&a->link);
     list_del(&b->link);
