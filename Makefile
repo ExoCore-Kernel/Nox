@@ -4,6 +4,7 @@ CC := clang
 LD := ld.lld
 PYTHON := python3
 QEMU := qemu-system-x86_64
+LIMINE := limine
 
 BUILD_DIR := build
 OBJ_DIR := $(BUILD_DIR)/obj
@@ -74,6 +75,7 @@ limine:
 
 iso: check-tools $(KERNEL) limine
 	@command -v xorriso >/dev/null || { echo "Missing xorriso"; exit 1; }
+	@command -v $(LIMINE) >/dev/null || { echo "Missing limine host utility"; exit 1; }
 	rm -rf $(ISO_ROOT)
 	mkdir -p $(ISO_ROOT)/boot/limine $(ISO_ROOT)/EFI/BOOT
 	cp $(KERNEL) $(ISO_ROOT)/boot/twilight.elf
@@ -89,7 +91,7 @@ iso: check-tools $(KERNEL) limine
 		--efi-boot boot/limine/limine-uefi-cd.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
 		$(ISO_ROOT) -o $(ISO)
-	$(LIMINE_DIR)/limine bios-install $(ISO)
+	$(LIMINE) bios-install $(ISO)
 	@echo "Built $(ISO)"
 
 run: iso
