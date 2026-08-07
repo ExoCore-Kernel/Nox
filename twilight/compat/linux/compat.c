@@ -3,9 +3,11 @@
 
 #include <linux/kernel.h>
 #include <linux/list.h>
+#include <linux/pci.h>
 #include <linux/printk.h>
 #include <linux/slab.h>
 #include <twilight/linux_compat.h>
+#include <twilight/pci.h>
 
 struct compat_test_node {
     uint32_t value;
@@ -47,7 +49,7 @@ bool linux_compat_self_test(void) {
     }
 
     const uint8_t array_probe[] = {1, 2, 3, 4};
-    const bool ok = sum == 42u && ARRAY_SIZE(array_probe) == 4u;
+    const bool basic_ok = sum == 42u && ARRAY_SIZE(array_probe) == 4u;
 
     list_del(&a->link);
     list_del(&b->link);
@@ -55,6 +57,26 @@ bool linux_compat_self_test(void) {
     kfree(b);
     kfree(zeroed);
 
-    if (ok) pr_info("compat self-test: slab/list/printk/types ready");
-    return ok;
+    if (!basic_ok) return false;
+    pr_info("compat self-test: slab/list/printk/types ready");
+
+    if (!pci_init()) {
+        pr_err("native PCI enumeration failed");
+        return false;
+    }
+
+    pr_info("native PCI: %zu device(s) enumerated", pci_device_count());
+    if (!linux_pci_compat_self_test()) {
+        pr_err("Linux PCI driver bind/unbind self-test failed");
+        return false;
+    }
+
+    const int builtin_result = linux_pci_register_builtin_drivers();
+    if (builtin_result != 0) {
+        pr_err("built-in Linux PCI driver registration failed: %d", builtin_result);
+        return false;
+    }
+
+    pr_info("Linux PCI compatibility ready: config, BARs, matching and built-in driver registration");
+    return true;
 }
