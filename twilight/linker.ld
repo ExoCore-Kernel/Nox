@@ -24,7 +24,13 @@ SECTIONS {
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
     __twilight_rodata_start = .;
-    .rodata : { *(.rodata .rodata.*) } :rodata
+    .rodata : {
+        *(.rodata .rodata.*)
+        . = ALIGN(8);
+        __twilight_pci_drivers_start = .;
+        KEEP(*(.twilight_pci_drivers))
+        __twilight_pci_drivers_end = .;
+    } :rodata
     __twilight_rodata_end = .;
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
