@@ -36,18 +36,31 @@ void framebuffer_put_pixel(size_t x, size_t y, uint8_t red, uint8_t green, uint8
     row[x] = pack_rgb(red, green, blue);
 }
 
+void framebuffer_fill_rect(size_t x, size_t y, size_t width, size_t height,
+                           uint8_t red, uint8_t green, uint8_t blue) {
+    if (fb == NULL || x >= fb->width || y >= fb->height) {
+        return;
+    }
+
+    size_t end_x = x + width;
+    size_t end_y = y + height;
+    if (end_x > fb->width) end_x = fb->width;
+    if (end_y > fb->height) end_y = fb->height;
+
+    const uint32_t colour = pack_rgb(red, green, blue);
+    for (size_t py = y; py < end_y; ++py) {
+        volatile uint32_t *row = (volatile uint32_t *)((uintptr_t)fb->address + py * fb->pitch);
+        for (size_t px = x; px < end_x; ++px) {
+            row[px] = colour;
+        }
+    }
+}
+
 void framebuffer_clear(uint8_t red, uint8_t green, uint8_t blue) {
     if (fb == NULL) {
         return;
     }
-
-    const uint32_t colour = pack_rgb(red, green, blue);
-    for (size_t y = 0; y < fb->height; ++y) {
-        volatile uint32_t *row = (volatile uint32_t *)((uintptr_t)fb->address + y * fb->pitch);
-        for (size_t x = 0; x < fb->width; ++x) {
-            row[x] = colour;
-        }
-    }
+    framebuffer_fill_rect(0, 0, fb->width, fb->height, red, green, blue);
 }
 
 size_t framebuffer_width(void) {
