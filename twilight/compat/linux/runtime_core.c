@@ -1,5 +1,6 @@
 #include <stdbool.h>
 
+#include <linux/netdevice.h>
 #include <linux/pci.h>
 #include <linux/printk.h>
 #include <twilight/irq.h>
@@ -61,6 +62,15 @@ bool linux_driver_runtime_init(void) {
     runtime_initialized = true;
     runtime_initializing = false;
     pr_info("built-in Linux PCI drivers registered after interrupt bring-up");
+
+    if (linux_net_device_count() != 0) {
+        pr_info("Linux network core: %zu Ethernet device(s) registered; starting end-to-end ARP test",
+                linux_net_device_count());
+        if (!linux_net_run_arp_self_test()) {
+            pr_warn("Linux Ethernet ARP self-test did not complete; driver runtime remains active for diagnostics");
+        }
+    }
+
     return true;
 }
 
