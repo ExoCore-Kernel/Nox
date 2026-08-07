@@ -21,49 +21,12 @@
 static size_t log_y;
 static bool uptime_enabled;
 
-static void append_char(char *buffer, size_t *index, size_t capacity, char c) {
-    if (*index + 1u >= capacity) return;
-    buffer[(*index)++] = c;
-    buffer[*index] = '\0';
-}
-
-static void append_u64_padded(char *buffer, size_t *index, size_t capacity,
-                              uint64_t value, unsigned width, char pad) {
-    char temp[24];
-    unsigned n = 0;
-    do {
-        temp[n++] = (char)('0' + (value % 10u));
-        value /= 10u;
-    } while (value != 0 && n < sizeof(temp));
-
-    while (n < width) {
-        append_char(buffer, index, capacity, pad);
-        --width;
-    }
-    while (n > 0) append_char(buffer, index, capacity, temp[--n]);
-}
-
-static void format_prefix(char out[32]) {
-    const uint64_t us = uptime_enabled ? timer_uptime_us() : 0;
-    const uint64_t seconds = us / 1000000ull;
-    const uint64_t micros = us % 1000000ull;
-    size_t i = 0;
-
-    append_char(out, &i, 32, '[');
-    append_u64_padded(out, &i, 32, seconds, 5, ' ');
-    append_char(out, &i, 32, '.');
-    append_u64_padded(out, &i, 32, micros, 6, '0');
-    append_char(out, &i, 32, ']');
-    append_char(out, &i, 32, ' ');
-}
-
 static void ensure_room_for_line(void) {
     const size_t line_h = font_height() + 2u;
-    const size_t bottom = framebuffer_height() > LOG_BOTTOM_MARGIN
-        ? framebuffer_height() - LOG_BOTTOM_MARGIN
-        : framebuffer_height();
+    const size_t height = framebuffer_height();
+    const size_t bottom = height > LOG_BOTTOM_MARGIN ? height - LOG_BOTTOM_MARGIN : height;
 
-    if (line_h == 2u || bottom <= LOG_TOP) return;
+    if (line_h <= 2u || bottom <= LOG_TOP) return;
 
     if (log_y + font_height() >= bottom) {
         framebuffer_scroll_region_up(LOG_TOP, bottom, line_h,
@@ -71,6 +34,47 @@ static void ensure_room_for_line(void) {
         if (log_y >= line_h) log_y -= line_h;
         if (log_y < LOG_TOP) log_y = LOG_TOP;
     }
+}
+
+static void draw_uptime_prefix(uint8_t red, uint8_t green, uint8_t blue) {
+    if (!uptime_enabled) {
+        font_draw_string("[    0.000000] ", LOG_X, log_y, red, green, blue);
+        return;
+    }
+
+    const uint64_t us = timer_uptime_us();
+    uint64_t seconds = us / 1000000ull;
+    uint64_t micros = us % 1000000ull;
+
+    /* Fixed-width Linux-style prefix. No memset or general formatter is used here. */
+    char prefix[16];
+    prefix[0] = '[';
+    prefix[1] = ' ';
+    prefix[2] = ' ';
+    prefix[3] = ' ';
+    prefix[4] = ' ';
+    prefix[5] = '0';
+    prefix[6] = '.';
+    prefix[7] = '0';
+    prefix[8] = '0';
+    prefix[9] = '0';
+    prefix[10] = '0';
+    prefix[11] = '0';
+    prefix[12] = '0';
+    prefix[13] = ']';
+    prefix[14] = ' ';
+    prefix[15] = '\0';
+
+    for (int i = 5; i >= 1 && seconds != 0; --i) {
+        prefix[i] = (char)('0' + (seconds % 10ull));
+        seconds /= 10ull;
+    }
+    for (int i = 12; i >= 7; --i) {
+        prefix[i] = (char)('0' + (micros % 10ull));
+        micros /= 10ull;
+    }
+
+    font_draw_string(prefix, LOG_X, log_y, red, green, blue);
 }
 
 void klog_init(void) {
@@ -86,18 +90,14 @@ void klog_color(const char *message, uint8_t red, uint8_t green, uint8_t blue) {
     if (message == NULL) return;
 
     const size_t line_h = font_height() + 2u;
-    if (line_h == 2u) return;
+    if (line_h <= 2u) return;
 
     ensure_room_for_line();
-
-    char prefix[32] = {0};
-    format_prefix(prefix);
-
-    font_draw_string(prefix, LOG_X, log_y, red, green, blue);
+    draw_uptime_prefix(red, green, blue);
     font_draw_string(message, LOG_X + font_width() * 16u, log_y, red, green, blue);
     log_y += line_h;
 
-    serial_write(prefix);
+    /* Serial is best-effort only and cannot block framebuffer output. */
     serial_write(message);
     serial_write("\n");
 }
