@@ -6,6 +6,7 @@
 #include <twilight/font.h>
 #include <twilight/font_blob.h>
 #include <twilight/framebuffer.h>
+#include <twilight/heap.h>
 #include <twilight/interrupts.h>
 #include <twilight/keyboard.h>
 #include <twilight/log.h>
@@ -30,6 +31,10 @@
 
 #ifndef TWILIGHT_VMM_SELF_TEST
 #define TWILIGHT_VMM_SELF_TEST 1
+#endif
+
+#ifndef TWILIGHT_HEAP_SELF_TEST
+#define TWILIGHT_HEAP_SELF_TEST 1
 #endif
 
 __attribute__((used, section(".limine_requests_start")))
@@ -179,48 +184,36 @@ static void log_pmm_stats(void) {
     klog_parts(pmm_parts, sizeof(pmm_parts) / sizeof(pmm_parts[0]));
 }
 
+static void log_heap_stats(void) {
+    struct heap_stats stats;
+    char arena_mib[32];
+    char mapped_pages[32];
+
+    heap_get_stats(&stats);
+    u64_to_decimal(stats.arena_bytes / (1024ull * 1024ull), arena_mib);
+    u64_to_decimal(stats.mapped_pages, mapped_pages);
+
+    const char *parts[] = {
+        "Kernel heap initialized: ", arena_mib,
+        " MiB virtual arena; ", mapped_pages, " anchor page(s) mapped"
+    };
+    klog_parts(parts, sizeof(parts) / sizeof(parts[0]));
+}
+
 #if TWILIGHT_SCROLL_SELF_TEST
 static void framebuffer_scroll_self_test(void) {
-    static const char *lines[] = {
-        "Framebuffer scroll test 01", "Framebuffer scroll test 02",
-        "Framebuffer scroll test 03", "Framebuffer scroll test 04",
-        "Framebuffer scroll test 05", "Framebuffer scroll test 06",
-        "Framebuffer scroll test 07", "Framebuffer scroll test 08",
-        "Framebuffer scroll test 09", "Framebuffer scroll test 10",
-        "Framebuffer scroll test 11", "Framebuffer scroll test 12",
-        "Framebuffer scroll test 13", "Framebuffer scroll test 14",
-        "Framebuffer scroll test 15", "Framebuffer scroll test 16",
-        "Framebuffer scroll test 17", "Framebuffer scroll test 18",
-        "Framebuffer scroll test 19", "Framebuffer scroll test 20",
-        "Framebuffer scroll test 21", "Framebuffer scroll test 22",
-        "Framebuffer scroll test 23", "Framebuffer scroll test 24",
-        "Framebuffer scroll test 25", "Framebuffer scroll test 26",
-        "Framebuffer scroll test 27", "Framebuffer scroll test 28",
-        "Framebuffer scroll test 29", "Framebuffer scroll test 30",
-        "Framebuffer scroll test 31", "Framebuffer scroll test 32",
-        "Framebuffer scroll test 33", "Framebuffer scroll test 34",
-        "Framebuffer scroll test 35", "Framebuffer scroll test 36",
-        "Framebuffer scroll test 37", "Framebuffer scroll test 38",
-        "Framebuffer scroll test 39", "Framebuffer scroll test 40",
-        "Framebuffer scroll test 41", "Framebuffer scroll test 42",
-        "Framebuffer scroll test 43", "Framebuffer scroll test 44",
-        "Framebuffer scroll test 45", "Framebuffer scroll test 46",
-        "Framebuffer scroll test 47", "Framebuffer scroll test 48",
-        "Framebuffer scroll test 49", "Framebuffer scroll test 50",
-        "Framebuffer scroll test 51", "Framebuffer scroll test 52",
-        "Framebuffer scroll test 53", "Framebuffer scroll test 54",
-        "Framebuffer scroll test 55", "Framebuffer scroll test 56",
-        "Framebuffer scroll test 57", "Framebuffer scroll test 58",
-        "Framebuffer scroll test 59", "Framebuffer scroll test 60"
-    };
-
     trace("starting framebuffer scroll self-test");
     klog("Starting framebuffer scroll self-test (500 ms per line)");
-    for (uint64_t i = 0; i < (sizeof(lines) / sizeof(lines[0])); ++i) {
-        klog(lines[i]);
+
+    for (uint64_t i = 1; i <= 60; ++i) {
+        char number[32];
+        u64_to_decimal(i, number);
+        const char *parts[] = { "Framebuffer scroll test ", number };
+        klog_parts(parts, sizeof(parts) / sizeof(parts[0]));
         timer_sleep_ms(500u);
         klog_heartbeat_update();
     }
+
     klog("Framebuffer scroll self-test complete");
     trace("framebuffer scroll self-test complete");
 }
@@ -316,6 +309,22 @@ void kmain(void) {
     }
     trace("VMM self-test passed");
     klog("VMM self-test passed: map, translate, protect, unmap and address-space clone");
+#endif
+
+    trace("initializing kernel heap");
+    if (!heap_init()) {
+        kernel_panic("Kernel heap initialization failed");
+    }
+    trace("kernel heap initialized");
+    log_heap_stats();
+
+#if TWILIGHT_HEAP_SELF_TEST
+    trace("running kernel heap self-test");
+    if (!heap_self_test()) {
+        kernel_panic("Kernel heap self-test failed");
+    }
+    trace("kernel heap self-test passed");
+    klog("Heap self-test passed: slab, calloc, realloc, large pages and leak checks");
 #endif
 
 #if TWILIGHT_PANIC_SELF_TEST
