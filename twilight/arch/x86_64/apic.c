@@ -3,19 +3,19 @@
 
 #include <twilight/apic.h>
 #include <twilight/io.h>
-#include <twilight/pmm.h>
 
 #define IA32_APIC_BASE_MSR 0x1bu
 #define IA32_APIC_BASE_ENABLE (1ull << 11)
 #define IA32_APIC_BASE_X2APIC (1ull << 10)
-#define IA32_APIC_BASE_ADDRESS_MASK 0xfffff000ull
 
-#define LAPIC_EOI       0x0b0u
-#define LAPIC_SVR       0x0f0u
-#define LAPIC_LVT_LINT0 0x350u
-#define LAPIC_SVR_ENABLE (1u << 8)
+/* x2APIC MSR numbers are 0x800 + (xAPIC register offset >> 4). */
+#define X2APIC_EOI_MSR       0x80bu
+#define X2APIC_SVR_MSR       0x80fu
+#define X2APIC_LVT_LINT0_MSR 0x835u
+
+#define LAPIC_SVR_ENABLE          (1u << 8)
 #define LAPIC_LVT_DELIVERY_EXTINT (7u << 8)
-#define LAPIC_LVT_MASKED (1u << 16)
+#define LAPIC_LVT_MASKED          (1u << 16)
 
 /*
  * Interrupt Mode Configuration Register used by PC-compatible chipsets.
@@ -27,8 +27,8 @@
 #define IMCR_REGISTER    0x70u
 #define IMCR_APIC_ROUTE  0x01u
 
-static volatile uint32_t *lapic_mmio;
 static bool virtual_wire_enabled;
+static bool virtual_wire_uses_x2apic;
 
 static void cpuid(uint32_t leaf, uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx) {
     __asm__ volatile (
@@ -63,15 +63,31 @@ static void set_imcr_route(bool apic_route) {
     io_wait();
 }
 
+static void cpuid_leaf1(uint32_t *ecx, uint32_t *edx) {
+    uint32_t eax;
+    uint32_t ebx;
+    cpuid(1u, &eax, &ebx, ecx, edx);
+}
+
 static bool cpu_has_apic(void) {
-    uint32_t eax, ebx, ecx, edx;
-    cpuid(1u, &eax, &ebx, &ecx, &edx);
+    uint32_t ecx;
+    uint32_t edx;
+    cpuid_leaf1(&ecx, &edx);
+    (void)ecx;
     return (edx & (1u << 9)) != 0;
+}
+
+static bool cpu_has_x2apic(void) {
+    uint32_t ecx;
+    uint32_t edx;
+    cpuid_leaf1(&ecx, &edx);
+    (void)edx;
+    return (ecx & (1u << 21)) != 0;
 }
 
 bool apic_disable_for_legacy_pic(void) {
     virtual_wire_enabled = false;
-    lapic_mmio = 0;
+    virtual_wire_uses_x2apic = false;
 
     if (!cpu_has_apic()) return false;
 
@@ -79,53 +95,64 @@ bool apic_disable_for_legacy_pic(void) {
     set_imcr_route(false);
 
     uint64_t base = rdmsr(IA32_APIC_BASE_MSR);
+
+    /* If x2APIC was active, leave x2APIC before disabling the APIC globally. */
+    if ((base & IA32_APIC_BASE_X2APIC) != 0) {
+        base &= ~IA32_APIC_BASE_X2APIC;
+        wrmsr(IA32_APIC_BASE_MSR, base);
+    }
+
     base &= ~IA32_APIC_BASE_ENABLE;
     wrmsr(IA32_APIC_BASE_MSR, base);
     return true;
 }
 
 bool apic_enable_virtual_wire_for_legacy_pic(void) {
-    if (!cpu_has_apic()) return false;
+    if (!cpu_has_apic() || !cpu_has_x2apic()) return false;
 
     uint64_t base = rdmsr(IA32_APIC_BASE_MSR);
 
     /*
-     * Twilight currently uses xAPIC MMIO. If a bootloader ever leaves x2APIC
-     * enabled, transition through the disabled state before returning to xAPIC.
+     * Enter x2APIC through the architecturally valid state sequence:
+     * disabled -> xAPIC enabled -> x2APIC enabled.
+     *
+     * Using x2APIC MSRs avoids assuming that the LAPIC MMIO page at
+     * 0xFEE00000 is present in Limine's RAM-oriented HHDM mapping.
      */
-    if ((base & IA32_APIC_BASE_X2APIC) != 0) {
-        uint64_t disabled = base & ~(IA32_APIC_BASE_ENABLE | IA32_APIC_BASE_X2APIC);
-        wrmsr(IA32_APIC_BASE_MSR, disabled);
-        base = disabled;
-    }
-
+    base &= ~IA32_APIC_BASE_X2APIC;
     base |= IA32_APIC_BASE_ENABLE;
     wrmsr(IA32_APIC_BASE_MSR, base);
 
-    const uint64_t lapic_physical = base & IA32_APIC_BASE_ADDRESS_MASK;
-    lapic_mmio = (volatile uint32_t *)pmm_phys_to_virt(lapic_physical);
-    if (lapic_mmio == 0) return false;
+    base |= IA32_APIC_BASE_X2APIC;
+    wrmsr(IA32_APIC_BASE_MSR, base);
 
-    /* Enable the Local APIC while preserving its current spurious vector. */
-    uint32_t svr = lapic_mmio[LAPIC_SVR / 4u];
-    if ((svr & 0xffu) == 0) svr |= 0xffu;
+    /* Enable the Local APIC and ensure a valid spurious interrupt vector. */
+    uint32_t svr = (uint32_t)rdmsr(X2APIC_SVR_MSR);
+    if ((svr & 0xffu) < 0x10u) {
+        svr = (svr & ~0xffu) | 0xffu;
+    }
     svr |= LAPIC_SVR_ENABLE;
-    lapic_mmio[LAPIC_SVR / 4u] = svr;
+    wrmsr(X2APIC_SVR_MSR, svr);
 
     /* LINT0 receives the legacy 8259 INTR signal as ExtINT, unmasked. */
-    uint32_t lint0 = lapic_mmio[LAPIC_LVT_LINT0 / 4u];
+    uint32_t lint0 = (uint32_t)rdmsr(X2APIC_LVT_LINT0_MSR);
     lint0 &= ~(7u << 8);
     lint0 &= ~LAPIC_LVT_MASKED;
     lint0 |= LAPIC_LVT_DELIVERY_EXTINT;
-    lapic_mmio[LAPIC_LVT_LINT0 / 4u] = lint0;
+    wrmsr(X2APIC_LVT_LINT0_MSR, lint0);
 
-    /* Route the chipset's legacy interrupt output into the Local APIC. */
+    /* Now route the chipset's legacy interrupt output into the Local APIC. */
     set_imcr_route(true);
+
+    virtual_wire_uses_x2apic = true;
     virtual_wire_enabled = true;
     return true;
 }
 
 void apic_eoi_if_needed(void) {
-    if (!virtual_wire_enabled || lapic_mmio == 0) return;
-    lapic_mmio[LAPIC_EOI / 4u] = 0;
+    if (!virtual_wire_enabled) return;
+
+    if (virtual_wire_uses_x2apic) {
+        wrmsr(X2APIC_EOI_MSR, 0);
+    }
 }
