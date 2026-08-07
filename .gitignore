@@ -3,5 +3,6 @@ iso_root/
 limine-binary/
 twilight/bin/
 twilight/obj/
+.nox-tpm-state/
 *.iso
 .DS_Store
