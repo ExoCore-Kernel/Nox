@@ -58,6 +58,50 @@ static void trace(const char *message) {
     serial_write("\n");
 }
 
+static void framebuffer_scroll_self_test(void) {
+    static const char *lines[] = {
+        "Framebuffer scroll test 01", "Framebuffer scroll test 02",
+        "Framebuffer scroll test 03", "Framebuffer scroll test 04",
+        "Framebuffer scroll test 05", "Framebuffer scroll test 06",
+        "Framebuffer scroll test 07", "Framebuffer scroll test 08",
+        "Framebuffer scroll test 09", "Framebuffer scroll test 10",
+        "Framebuffer scroll test 11", "Framebuffer scroll test 12",
+        "Framebuffer scroll test 13", "Framebuffer scroll test 14",
+        "Framebuffer scroll test 15", "Framebuffer scroll test 16",
+        "Framebuffer scroll test 17", "Framebuffer scroll test 18",
+        "Framebuffer scroll test 19", "Framebuffer scroll test 20",
+        "Framebuffer scroll test 21", "Framebuffer scroll test 22",
+        "Framebuffer scroll test 23", "Framebuffer scroll test 24",
+        "Framebuffer scroll test 25", "Framebuffer scroll test 26",
+        "Framebuffer scroll test 27", "Framebuffer scroll test 28",
+        "Framebuffer scroll test 29", "Framebuffer scroll test 30",
+        "Framebuffer scroll test 31", "Framebuffer scroll test 32",
+        "Framebuffer scroll test 33", "Framebuffer scroll test 34",
+        "Framebuffer scroll test 35", "Framebuffer scroll test 36",
+        "Framebuffer scroll test 37", "Framebuffer scroll test 38",
+        "Framebuffer scroll test 39", "Framebuffer scroll test 40",
+        "Framebuffer scroll test 41", "Framebuffer scroll test 42",
+        "Framebuffer scroll test 43", "Framebuffer scroll test 44",
+        "Framebuffer scroll test 45", "Framebuffer scroll test 46",
+        "Framebuffer scroll test 47", "Framebuffer scroll test 48",
+        "Framebuffer scroll test 49", "Framebuffer scroll test 50",
+        "Framebuffer scroll test 51", "Framebuffer scroll test 52",
+        "Framebuffer scroll test 53", "Framebuffer scroll test 54",
+        "Framebuffer scroll test 55", "Framebuffer scroll test 56",
+        "Framebuffer scroll test 57", "Framebuffer scroll test 58",
+        "Framebuffer scroll test 59", "Framebuffer scroll test 60"
+    };
+
+    trace("starting framebuffer scroll self-test");
+    klog("Starting framebuffer scroll self-test (500 ms per line)");
+    for (uint64_t i = 0; i < (sizeof(lines) / sizeof(lines[0])); ++i) {
+        klog(lines[i]);
+        timer_sleep_ms(500u);
+    }
+    klog("Framebuffer scroll self-test complete");
+    trace("framebuffer scroll self-test complete");
+}
+
 void kmain(void) {
     interrupts_disable();
     (void)serial_init();
@@ -140,6 +184,8 @@ void kmain(void) {
 
     klog_enable_uptime();
     klog("PIT IRQ0 active; uptime clock running");
+
+    framebuffer_scroll_self_test();
 
     trace("initializing PS/2 keyboard");
     klog("Initializing PS/2 keyboard");
