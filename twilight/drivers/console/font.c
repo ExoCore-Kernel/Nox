@@ -115,6 +115,11 @@ static void draw_glyph(uint32_t codepoint, size_t x, size_t y,
     }
 }
 
+void font_draw_char(char c, size_t x, size_t y,
+                    uint8_t red, uint8_t green, uint8_t blue) {
+    draw_glyph((uint8_t)c, x, y, red, green, blue);
+}
+
 void font_draw_string(const char *text, size_t x, size_t y,
                       uint8_t red, uint8_t green, uint8_t blue) {
     if (!ready || text == NULL) {
@@ -123,8 +128,15 @@ void font_draw_string(const char *text, size_t x, size_t y,
 
     size_t cursor_x = x;
     for (size_t i = 0; text[i] != '\0'; ++i) {
-        const uint8_t c = (uint8_t)text[i];
-        draw_glyph(c, cursor_x, y, red, green, blue);
+        draw_glyph((uint8_t)text[i], cursor_x, y, red, green, blue);
         cursor_x += glyph_width;
     }
+}
+
+size_t font_width(void) {
+    return ready ? glyph_width : 0;
+}
+
+size_t font_height(void) {
+    return ready ? glyph_height : 0;
 }
