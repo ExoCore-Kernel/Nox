@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdint.h>
 
 #include <limine.h>
@@ -9,12 +10,21 @@
 #include <twilight/keyboard.h>
 #include <twilight/log.h>
 #include <twilight/panic.h>
+#include <twilight/pmm.h>
 #include <twilight/serial.h>
 #include <twilight/timer.h>
 #include <twilight/version.h>
 
 #ifndef TWILIGHT_PANIC_SELF_TEST
 #define TWILIGHT_PANIC_SELF_TEST 0
+#endif
+
+#ifndef TWILIGHT_SCROLL_SELF_TEST
+#define TWILIGHT_SCROLL_SELF_TEST 0
+#endif
+
+#ifndef TWILIGHT_PMM_SELF_TEST
+#define TWILIGHT_PMM_SELF_TEST 1
 #endif
 
 __attribute__((used, section(".limine_requests_start")))
@@ -33,6 +43,20 @@ static volatile struct limine_framebuffer_request framebuffer_request = {
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_executable_cmdline_request cmdline_request = {
     .id = LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID,
+    .revision = 0,
+    .response = 0,
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_memmap_request memmap_request = {
+    .id = LIMINE_MEMMAP_REQUEST_ID,
+    .revision = 0,
+    .response = 0,
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_hhdm_request hhdm_request = {
+    .id = LIMINE_HHDM_REQUEST_ID,
     .revision = 0,
     .response = 0,
 };
@@ -58,6 +82,48 @@ static void trace(const char *message) {
     serial_write("\n");
 }
 
+static void u64_to_decimal(uint64_t value, char out[32]) {
+    char reverse[32];
+    size_t count = 0;
+
+    do {
+        reverse[count++] = (char)('0' + (value % 10ull));
+        value /= 10ull;
+    } while (value != 0 && count < sizeof(reverse));
+
+    size_t i = 0;
+    while (count != 0) out[i++] = reverse[--count];
+    out[i] = '\0';
+}
+
+static void log_pmm_stats(void) {
+    struct pmm_stats stats;
+    char reported_mib[32];
+    char usable_mib[32];
+    char free_mib[32];
+    char metadata_kib[32];
+    char pinned_pages[32];
+
+    pmm_get_stats(&stats);
+    u64_to_decimal(stats.reported_bytes / (1024ull * 1024ull), reported_mib);
+    u64_to_decimal(stats.usable_bytes / (1024ull * 1024ull), usable_mib);
+    u64_to_decimal(stats.free_bytes / (1024ull * 1024ull), free_mib);
+    u64_to_decimal((stats.metadata_pages * TWILIGHT_PAGE_SIZE) / 1024ull, metadata_kib);
+    u64_to_decimal(stats.pinned_pages, pinned_pages);
+
+    const char *memory_parts[] = {
+        "Memory: ", reported_mib, " MiB reported, ", usable_mib, " MiB usable"
+    };
+    klog_parts(memory_parts, sizeof(memory_parts) / sizeof(memory_parts[0]));
+
+    const char *pmm_parts[] = {
+        "PMM: ", free_mib, " MiB free; metadata ", metadata_kib,
+        " KiB; pinned pages ", pinned_pages
+    };
+    klog_parts(pmm_parts, sizeof(pmm_parts) / sizeof(pmm_parts[0]));
+}
+
+#if TWILIGHT_SCROLL_SELF_TEST
 static void framebuffer_scroll_self_test(void) {
     static const char *lines[] = {
         "Framebuffer scroll test 01", "Framebuffer scroll test 02",
@@ -102,6 +168,7 @@ static void framebuffer_scroll_self_test(void) {
     klog("Framebuffer scroll self-test complete");
     trace("framebuffer scroll self-test complete");
 }
+#endif
 
 void kmain(void) {
     interrupts_disable();
@@ -154,6 +221,27 @@ void kmain(void) {
     klog("Console font initialized");
     trace("initial framebuffer logs returned");
 
+    if (memmap_request.response == 0 || hhdm_request.response == 0) {
+        kernel_panic("Limine memory map or HHDM response missing");
+    }
+
+    trace("initializing physical memory manager");
+    if (!pmm_init(memmap_request.response, hhdm_request.response->offset)) {
+        kernel_panic("Physical memory manager initialization failed");
+    }
+    trace("physical memory manager initialized");
+    klog("Physical memory manager initialized");
+    log_pmm_stats();
+
+#if TWILIGHT_PMM_SELF_TEST
+    trace("running PMM self-test");
+    if (!pmm_self_test()) {
+        kernel_panic("Physical memory manager self-test failed");
+    }
+    trace("PMM self-test passed");
+    klog("PMM self-test passed: page, aligned DMA32 run, free and double-free guard");
+#endif
+
 #if TWILIGHT_PANIC_SELF_TEST
     kernel_panic("Panic self-test: renderer is working");
 #endif
@@ -187,7 +275,9 @@ void kmain(void) {
     klog("PIT IRQ0 active; uptime clock running");
     klog_heartbeat_enable();
 
+#if TWILIGHT_SCROLL_SELF_TEST
     framebuffer_scroll_self_test();
+#endif
 
     trace("initializing PS/2 keyboard");
     klog("Initializing PS/2 keyboard");
