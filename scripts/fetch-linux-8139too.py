@@ -9,6 +9,7 @@ import sys
 import urllib.request
 
 URL = "https://raw.githubusercontent.com/torvalds/linux/v2.6.24/drivers/net/8139too.c"
+EXPECTED_GIT_BLOB_SHA1 = "eef6fecfff2ac731eb7259896ea8853adc384c8c"
 
 
 def git_blob_sha1(data: bytes) -> str:
@@ -26,18 +27,16 @@ def main() -> int:
     with urllib.request.urlopen(URL, timeout=30) as response:
         data = response.read()
 
-    # These checks make accidental tag/path changes fail loudly. The source
-    # bytes themselves are written exactly as received from upstream Linux.
-    if b"8139too.c: A RealTek RTL-8139 Fast Ethernet driver for Linux." not in data:
-        print("error: download is not Linux 8139too.c", file=sys.stderr)
-        return 1
-    if b'#define DRV_VERSION\t"0.9.28"' not in data:
-        print("error: download is not the pinned Linux v2.6.24 driver", file=sys.stderr)
+    actual = git_blob_sha1(data)
+    if actual != EXPECTED_GIT_BLOB_SHA1:
+        print("error: downloaded 8139too.c does not match pinned upstream Git blob", file=sys.stderr)
+        print(f"expected: {EXPECTED_GIT_BLOB_SHA1}", file=sys.stderr)
+        print(f"actual:   {actual}", file=sys.stderr)
         return 1
 
     output.write_bytes(data)
     print(f"Fetched unmodified Linux v2.6.24 8139too.c: {len(data)} bytes")
-    print(f"Upstream Git blob SHA-1: {git_blob_sha1(data)}")
+    print(f"Verified upstream Git blob SHA-1: {actual}")
     return 0
 
 
