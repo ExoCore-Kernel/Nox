@@ -10,6 +10,7 @@
 #include <twilight/panic.h>
 #include <twilight/serial.h>
 #include <twilight/timer.h>
+#include <twilight/version.h>
 
 #ifndef TWILIGHT_PANIC_SELF_TEST
 #define TWILIGHT_PANIC_SELF_TEST 0
@@ -24,6 +25,13 @@ static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(6);
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_framebuffer_request framebuffer_request = {
     .id = LIMINE_FRAMEBUFFER_REQUEST_ID,
+    .revision = 0,
+    .response = 0,
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_executable_cmdline_request cmdline_request = {
+    .id = LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID,
     .revision = 0,
     .response = 0,
 };
@@ -45,36 +53,37 @@ static __attribute__((noreturn)) void fatal_halt(void) {
 void kmain(void) {
     interrupts_disable();
     (void)serial_init();
-    serial_write("Twilight: entered kmain\n");
 
     if (!LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision)) {
-        serial_write("Twilight: unsupported Limine base revision\n");
         fatal_halt();
     }
 
     struct limine_framebuffer_response *response = framebuffer_request.response;
     if (response == 0 || response->framebuffer_count == 0 || response->framebuffers == 0) {
-        serial_write("Twilight: framebuffer response missing\n");
         fatal_halt();
     }
 
     if (!framebuffer_init(response->framebuffers[0])) {
-        serial_write("Twilight: framebuffer init failed\n");
         fatal_halt();
     }
 
     framebuffer_clear(12, 12, 18);
 
     if (!font_init(twilight_console_font, twilight_console_font_size)) {
-        serial_write("Twilight: font init failed\n");
         fatal_halt();
     }
 
-    /* Direct early marker: proves framebuffer + font before the logger runs. */
+    /* Earliest possible visible marker, independent of the logger. */
     font_draw_string("Twilight booting...", 32, 16, 235, 235, 235);
 
+    const char *cmdline = 0;
+    if (cmdline_request.response != 0) {
+        cmdline = cmdline_request.response->cmdline;
+    }
+    const char *os_name = twilight_os_name_from_cmdline(cmdline);
+
     klog_init();
-    klog("Twilight kernel starting");
+    twilight_print_version_banner(os_name);
     klog("Framebuffer initialized");
     klog("Console font initialized");
 
