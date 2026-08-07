@@ -75,7 +75,7 @@ LDFLAGS := \
 	-z max-page-size=0x1000 \
 	-T twilight/linker.ld
 
-.PHONY: all twilight font iso run run-gui run-headless run-q35 run-driver-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
+.PHONY: all twilight font iso run run-gui run-headless run-q35 run-driver-test run-linux-driver-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
 
 all: twilight
 
@@ -163,6 +163,10 @@ run-q35: iso
 run-driver-test: iso
 	@echo "Running Twilight with QEMU pci-testdev for Linux-driver compatibility testing"
 	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-device pci-testdev" sh scripts/run-qemu.sh auto pc $(ISO)
+
+run-linux-driver-test: iso
+	@echo "Running Twilight with QEMU pvpanic-pci and the upstream Linux pvpanic PCI driver"
+	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-device pvpanic-pci" sh scripts/run-qemu.sh auto pc $(ISO)
 
 run-tpm: iso
 	@echo "Running Twilight with persistent emulated TPM 2.0 (CRB frontend)"
