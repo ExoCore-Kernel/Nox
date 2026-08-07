@@ -9,6 +9,7 @@
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define BIT(nr) (1ull << (nr))
 #define BIT_ULL(nr) (1ull << (nr))
+#define DECLARE_MAC_BUF(name) char name[18]
 
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
