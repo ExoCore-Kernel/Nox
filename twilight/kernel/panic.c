@@ -4,6 +4,7 @@
 #include <twilight/font.h>
 #include <twilight/framebuffer.h>
 #include <twilight/panic.h>
+#include <twilight/pvpanic.h>
 #include <twilight/serial.h>
 
 static const char *exception_name(uint64_t vector) {
@@ -74,6 +75,7 @@ __attribute__((noreturn)) void kernel_panic(const char *reason) {
     serial_write("[panic] reason: ");
     serial_write(message);
     serial_write("\n[panic] system halted\n");
+    pvpanic_twilight_panic_notify();
 
     framebuffer_clear(80, 0, 0);
     font_draw_string("TWILIGHT KERNEL PANIC", 48, 48, 255, 255, 255);
@@ -107,6 +109,7 @@ __attribute__((noreturn)) void kernel_panic_exception(uint64_t vector,
         serial_page_fault_bits(error_code);
     }
     serial_write("[panic] system halted\n");
+    pvpanic_twilight_panic_notify();
 
     framebuffer_clear(80, 0, 0);
     font_draw_string("TWILIGHT KERNEL PANIC", 48, 48, 255, 255, 255);
