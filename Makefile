@@ -161,8 +161,8 @@ run-q35: iso
 	@QEMU="$(QEMU)" sh scripts/run-qemu.sh auto q35 $(ISO)
 
 run-driver-test: iso
-	@echo "Running Twilight with QEMU EDU PCI device for Linux-driver compatibility testing"
-	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-device edu" sh scripts/run-qemu.sh auto pc $(ISO)
+	@echo "Running Twilight with QEMU pci-testdev for Linux-driver compatibility testing"
+	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-device pci-testdev" sh scripts/run-qemu.sh auto pc $(ISO)
 
 run-tpm: iso
 	@echo "Running Twilight with persistent emulated TPM 2.0 (CRB frontend)"
