@@ -20,19 +20,45 @@
 
 static size_t log_y;
 static bool uptime_enabled;
+static bool heartbeat_enabled;
+static bool heartbeat_visible;
+static size_t heartbeat_y;
+static uint64_t heartbeat_phase;
+
+static size_t line_height(void) {
+    return font_height() + 2u;
+}
+
+static size_t log_bottom(void) {
+    const size_t height = framebuffer_height();
+    return height > LOG_BOTTOM_MARGIN ? height - LOG_BOTTOM_MARGIN : height;
+}
+
+static void heartbeat_erase(void) {
+    if (!heartbeat_enabled || !heartbeat_visible) return;
+    const size_t w = font_width();
+    const size_t h = font_height();
+    if (w == 0 || h == 0) return;
+    framebuffer_fill_rect(LOG_X, heartbeat_y, w, h, LOG_BG_R, LOG_BG_G, LOG_BG_B);
+    heartbeat_visible = false;
+}
 
 static void ensure_room_for_line(void) {
-    const size_t line_h = font_height() + 2u;
-    const size_t height = framebuffer_height();
-    const size_t bottom = height > LOG_BOTTOM_MARGIN ? height - LOG_BOTTOM_MARGIN : height;
+    const size_t line_h = line_height();
+    const size_t bottom = log_bottom();
 
     if (line_h <= 2u || bottom <= LOG_TOP) return;
 
-    if (log_y + font_height() >= bottom) {
+    /* Reserve one full line below the newest log for the heartbeat cursor. */
+    while (log_y + line_h + font_height() >= bottom) {
+        heartbeat_erase();
         framebuffer_scroll_region_up(LOG_TOP, bottom, line_h,
                                      LOG_BG_R, LOG_BG_G, LOG_BG_B);
         if (log_y >= line_h) log_y -= line_h;
-        if (log_y < LOG_TOP) log_y = LOG_TOP;
+        if (log_y < LOG_TOP) {
+            log_y = LOG_TOP;
+            break;
+        }
     }
 }
 
@@ -86,16 +112,59 @@ static size_t text_width_pixels(const char *text) {
 void klog_init(void) {
     log_y = LOG_TOP;
     uptime_enabled = false;
+    heartbeat_enabled = false;
+    heartbeat_visible = false;
+    heartbeat_y = LOG_TOP;
+    heartbeat_phase = 0;
 }
 
 void klog_enable_uptime(void) {
     uptime_enabled = true;
 }
 
+void klog_heartbeat_enable(void) {
+    heartbeat_enabled = true;
+    heartbeat_visible = false;
+    heartbeat_y = log_y;
+    heartbeat_phase = timer_uptime_us() / 500000ull;
+    klog_heartbeat_update();
+}
+
+void klog_heartbeat_update(void) {
+    if (!heartbeat_enabled || !uptime_enabled) return;
+
+    const size_t line_h = line_height();
+    const size_t bottom = log_bottom();
+    if (line_h <= 2u || bottom <= LOG_TOP) return;
+
+    const uint64_t phase = timer_uptime_us() / 500000ull;
+    const size_t target_y = log_y;
+
+    if (target_y != heartbeat_y) {
+        heartbeat_erase();
+        heartbeat_y = target_y;
+    }
+
+    if (heartbeat_y + font_height() >= bottom) {
+        ensure_room_for_line();
+        heartbeat_y = log_y;
+    }
+
+    if (phase == heartbeat_phase && heartbeat_visible) return;
+    heartbeat_phase = phase;
+
+    heartbeat_erase();
+    if ((phase & 1ull) == 0ull) {
+        font_draw_string("_", LOG_X, heartbeat_y, LOG_FG_R, LOG_FG_G, LOG_FG_B);
+        heartbeat_visible = true;
+    }
+}
+
 void klog_parts(const char *const *parts, size_t count) {
-    const size_t line_h = font_height() + 2u;
+    const size_t line_h = line_height();
     if (parts == NULL || line_h <= 2u) return;
 
+    heartbeat_erase();
     ensure_room_for_line();
     draw_uptime_prefix(LOG_FG_R, LOG_FG_G, LOG_FG_B);
 
@@ -109,18 +178,21 @@ void klog_parts(const char *const *parts, size_t count) {
     }
     serial_write("\n");
     log_y += line_h;
+    heartbeat_y = log_y;
 }
 
 void klog_color(const char *message, uint8_t red, uint8_t green, uint8_t blue) {
     if (message == NULL) return;
 
-    const size_t line_h = font_height() + 2u;
+    const size_t line_h = line_height();
     if (line_h <= 2u) return;
 
+    heartbeat_erase();
     ensure_room_for_line();
     draw_uptime_prefix(red, green, blue);
     font_draw_string(message, LOG_X + font_width() * 16u, log_y, red, green, blue);
     log_y += line_h;
+    heartbeat_y = log_y;
 
     serial_write(message);
     serial_write("\n");
