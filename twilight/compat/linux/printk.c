@@ -1,4 +1,5 @@
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -20,15 +21,6 @@ static void append_char(struct output_buffer *out, char value) {
 static void append_string(struct output_buffer *out, const char *string) {
     if (string == 0) string = "(null)";
     while (*string != '\0') append_char(out, *string++);
-}
-
-static size_t number_digits(uint64_t value, unsigned base) {
-    size_t digits = 1;
-    while (value >= base) {
-        value /= base;
-        ++digits;
-    }
-    return digits;
 }
 
 static void append_unsigned(struct output_buffer *out,
