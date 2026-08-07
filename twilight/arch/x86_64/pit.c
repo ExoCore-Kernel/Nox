@@ -44,3 +44,16 @@ uint64_t timer_uptime_us(void) {
     if (hz == 0) return 0;
     return (ticks * 1000000ull) / hz;
 }
+
+void timer_sleep_ms(uint64_t milliseconds) {
+    const uint64_t hz = frequency_hz;
+    if (hz == 0 || milliseconds == 0) return;
+
+    uint64_t wait_ticks = (milliseconds * hz + 999ull) / 1000ull;
+    if (wait_ticks == 0) wait_ticks = 1;
+
+    const uint64_t start = timer_ticks();
+    while ((timer_ticks() - start) < wait_ticks) {
+        __asm__ volatile ("hlt");
+    }
+}
