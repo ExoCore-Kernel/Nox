@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <twilight/cpu_security.h>
 #include <twilight/gdt.h>
 
 struct __attribute__((packed)) x86_64_tss {
@@ -27,10 +28,6 @@ struct __attribute__((packed)) gdtr {
     uint64_t base;
 };
 
-/*
- * Kept global so the ring-transition assembly can update RSP0 immediately
- * before IRETQ. RSP0 starts at byte offset 4 in the architectural TSS.
- */
 struct x86_64_tss gdt_tss;
 
 static uint64_t gdt[7] __attribute__((aligned(16)));
@@ -47,7 +44,7 @@ static void set_tss_descriptor(uint64_t base, uint32_t limit) {
     uint64_t low = 0;
     low |= (uint64_t)(limit & 0xffffu);
     low |= (base & 0xffffffull) << 16;
-    low |= 0x89ull << 40; /* present, DPL0, available 64-bit TSS */
+    low |= 0x89ull << 40;
     low |= (uint64_t)((limit >> 16) & 0x0fu) << 48;
     low |= ((base >> 24) & 0xffull) << 56;
 
@@ -60,17 +57,14 @@ bool gdt_init(void) {
     bytes_zero(gdt, sizeof(gdt));
     bytes_zero(&gdt_tss, sizeof(gdt_tss));
 
-    /*
-     * Long-mode descriptors. Code segments have L=1/DB=0; data segments use
-     * the conventional 32-bit data encoding because base/limit are ignored in
-     * 64-bit mode while access privilege checks still apply.
-     */
     gdt[0] = 0x0000000000000000ull;
-    gdt[1] = 0x00af9a000000ffffull; /* ring 0 code */
-    gdt[2] = 0x00cf92000000ffffull; /* ring 0 data */
-    gdt[3] = 0x00cff2000000ffffull; /* ring 3 data */
-    gdt[4] = 0x00affa000000ffffull; /* ring 3 code */
+    gdt[1] = 0x00af9a000000ffffull;
+    gdt[2] = 0x00cf92000000ffffull;
+    gdt[3] = 0x00cff2000000ffffull;
+    gdt[4] = 0x00affa000000ffffull;
 
+    /* No I/O bitmap is present inside the TSS limit, so CPL3 has no direct
+     * port-I/O permission. Drivers remain mediated by the kernel. */
     gdt_tss.iomap_base = (uint16_t)sizeof(gdt_tss);
     set_tss_descriptor((uint64_t)(uintptr_t)&gdt_tss,
                        (uint32_t)(sizeof(gdt_tss) - 1u));
@@ -88,6 +82,7 @@ bool gdt_init(void) {
     __asm__ volatile ("str %0" : "=r"(tr));
 
     if (cs != TWILIGHT_GDT_KERNEL_CODE || tr != TWILIGHT_GDT_TSS) return false;
+    if (!cpu_security_init()) return false;
 
     initialized = true;
     return true;
