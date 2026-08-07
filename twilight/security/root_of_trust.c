@@ -16,8 +16,9 @@ extern const uint8_t __twilight_rodata_end[];
  * makes old TPM-authorized secrets unavailable.
  */
 static const char security_policy_descriptor[] =
-    "Twilight.SecurityPolicy.v2|"
-    "separate-user-CR3|CPL3|W^X|NX|"
+    "Twilight.SecurityPolicy.v3|"
+    "separate-user-CR3|CPL3|W^X|NX|no-user-IO|"
+    "CR0.WP|required|SMEP-if-supported|SMAP-if-supported|UMIP-if-supported|"
     "TPM2-PCR7+PCR11+PCR12|"
     "policy-only-TPM-keys|AES128-CFB|HMAC-SHA256|"
     "fail-closed-on-PCR-policy-loss";
