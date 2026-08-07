@@ -39,6 +39,9 @@ CFLAGS := \
 	-m64 \
 	-march=x86-64 \
 	-mno-red-zone \
+	-mno-mmx \
+	-mno-sse \
+	-mno-sse2 \
 	-mcmodel=kernel \
 	-DTWILIGHT_PANIC_SELF_TEST=$(PANIC_SELF_TEST) \
 	-Itwilight/include
