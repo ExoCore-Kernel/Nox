@@ -5,6 +5,7 @@ MODE="${1:-auto}"
 MACHINE="${2:-pc}"
 ISO="${3:-build/nox.iso}"
 QEMU_BIN="${QEMU:-qemu-system-x86_64}"
+QEMU_EXTRA_ARGS="${QEMU_EXTRA_ARGS:-}"
 
 if ! command -v "$QEMU_BIN" >/dev/null 2>&1; then
     echo "error: missing $QEMU_BIN" >&2
@@ -73,7 +74,10 @@ case "$MACHINE" in
         ;;
 esac
 
-COMMON_ARGS="-M $MACHINE $CPU_ARGS -m 512M -cdrom $ISO -serial stdio -monitor none -no-reboot -no-shutdown"
+# QEMU_EXTRA_ARGS is intentionally a shell-split argument fragment supplied by
+# trusted project scripts (for example scripts/run-qemu-tpm.sh). Do not pass
+# untrusted user input through it.
+COMMON_ARGS="-M $MACHINE $CPU_ARGS -m 512M -cdrom $ISO -serial stdio -monitor none -no-reboot -no-shutdown $QEMU_EXTRA_ARGS"
 
 if [ "$MODE" = "gui" ]; then
     echo "QEMU display: graphical session detected; opening display window"
