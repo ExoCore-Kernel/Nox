@@ -9,7 +9,10 @@
 #include <linux/types.h>
 
 #define PCI_ANY_ID (~0u)
-#define PCI_VENDOR_ID_REDHAT 0x1b36u
+#define PCI_VENDOR_ID_REDHAT  0x1b36u
+#define PCI_VENDOR_ID_REALTEK 0x10ecu
+#define PCI_DEVICE_ID_REALTEK_8139 0x8139u
+#define PCI_VENDOR_ID_ATHEROS 0x168cu
 
 #define PCI_COMMAND          0x04
 #define PCI_COMMAND_IO       0x0001
@@ -39,9 +42,7 @@
 
 struct twilight_pci_device;
 
-struct pci_bus {
-    u8 number;
-};
+struct pci_bus { u8 number; };
 
 struct pci_device_id {
     u32 vendor;
@@ -110,6 +111,11 @@ void pci_clear_master(struct pci_dev *pdev);
 resource_size_t pci_resource_start(struct pci_dev *pdev, int bar);
 resource_size_t pci_resource_len(struct pci_dev *pdev, int bar);
 unsigned long pci_resource_flags(struct pci_dev *pdev, int bar);
+static inline resource_size_t pci_resource_end(struct pci_dev *pdev, int bar) {
+    const resource_size_t start = pci_resource_start(pdev, bar);
+    const resource_size_t length = pci_resource_len(pdev, bar);
+    return length == 0 ? start : start + length - 1u;
+}
 
 void __iomem *pci_iomap(struct pci_dev *pdev, int bar, unsigned long maxlen);
 void pci_iounmap(struct pci_dev *pdev, void __iomem *address);
@@ -131,6 +137,8 @@ struct pci_dev *pci_get_device(unsigned int vendor,
                                struct pci_dev *from);
 void pci_dev_put(struct pci_dev *pdev);
 
+const char *pci_name(const struct pci_dev *pdev);
+
 static inline void pci_set_drvdata(struct pci_dev *pdev, void *data) {
     if (pdev != 0) dev_set_drvdata(&pdev->dev, data);
 }
@@ -143,10 +151,7 @@ static inline int pci_enable_msi(struct pci_dev *pdev) {
     (void)pdev;
     return -ENOSYS;
 }
-
-static inline void pci_disable_msi(struct pci_dev *pdev) {
-    (void)pdev;
-}
+static inline void pci_disable_msi(struct pci_dev *pdev) { (void)pdev; }
 
 #define module_pci_driver(__pci_driver) \
     static struct pci_driver * const \
