@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include <linux/types.h>
+#include <twilight/io.h>
 #include <twilight/mmio.h>
 
 #define __iomem
