@@ -11,3 +11,4 @@ void klog_parts(const char *const *parts, size_t count);
 void klog_heartbeat_enable(void);
 void klog_heartbeat_update(void);
 size_t klog_next_console_y(void);
+size_t klog_console_newline_y(void);
