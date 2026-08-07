@@ -97,6 +97,7 @@ static void framebuffer_scroll_self_test(void) {
     for (uint64_t i = 0; i < (sizeof(lines) / sizeof(lines[0])); ++i) {
         klog(lines[i]);
         timer_sleep_ms(500u);
+        klog_heartbeat_update();
     }
     klog("Framebuffer scroll self-test complete");
     trace("framebuffer scroll self-test complete");
@@ -184,6 +185,7 @@ void kmain(void) {
 
     klog_enable_uptime();
     klog("PIT IRQ0 active; uptime clock running");
+    klog_heartbeat_enable();
 
     framebuffer_scroll_self_test();
 
@@ -200,5 +202,8 @@ void kmain(void) {
     trace("PS/2 IRQ1 unmasked; boot complete");
     klog("PS/2 keyboard IRQ1 enabled; type below");
 
-    halt_forever();
+    for (;;) {
+        __asm__ volatile ("hlt");
+        klog_heartbeat_update();
+    }
 }
