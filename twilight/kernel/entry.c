@@ -8,6 +8,7 @@
 #include <twilight/keyboard.h>
 #include <twilight/log.h>
 #include <twilight/panic.h>
+#include <twilight/serial.h>
 #include <twilight/timer.h>
 
 #ifndef TWILIGHT_PANIC_SELF_TEST
@@ -43,25 +44,34 @@ static __attribute__((noreturn)) void fatal_halt(void) {
 
 void kmain(void) {
     interrupts_disable();
+    (void)serial_init();
+    serial_write("Twilight: entered kmain\n");
 
     if (!LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision)) {
+        serial_write("Twilight: unsupported Limine base revision\n");
         fatal_halt();
     }
 
     struct limine_framebuffer_response *response = framebuffer_request.response;
     if (response == 0 || response->framebuffer_count == 0 || response->framebuffers == 0) {
+        serial_write("Twilight: framebuffer response missing\n");
         fatal_halt();
     }
 
     if (!framebuffer_init(response->framebuffers[0])) {
+        serial_write("Twilight: framebuffer init failed\n");
         fatal_halt();
     }
 
     framebuffer_clear(12, 12, 18);
 
     if (!font_init(twilight_console_font, twilight_console_font_size)) {
+        serial_write("Twilight: font init failed\n");
         fatal_halt();
     }
+
+    /* Direct early marker: proves framebuffer + font before the logger runs. */
+    font_draw_string("Twilight booting...", 32, 16, 235, 235, 235);
 
     klog_init();
     klog("Twilight kernel starting");
@@ -85,6 +95,7 @@ void kmain(void) {
     while (timer_ticks() == 0) {
         __asm__ volatile ("hlt");
     }
+    klog_enable_uptime();
     klog("PIT IRQ0 active; uptime clock running");
 
     klog("Initializing PS/2 keyboard");
