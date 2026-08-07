@@ -41,9 +41,6 @@ struct ethtool_ops;
 struct ifreq;
 struct net_device;
 
-/* Linux 2.6 multicast list representation used by the unmodified 8139too
- * source. Twilight currently leaves the list empty unless a networking layer
- * explicitly installs multicast addresses. */
 struct dev_mc_list {
     struct dev_mc_list *next;
     u8 dmi_addr[ETH_ALEN];
@@ -100,9 +97,6 @@ struct net_device {
     const struct net_device_ops *netdev_ops;
     const struct ethtool_ops *ethtool_ops;
 
-    /* Linux 2.6-era net_device entry points used by the pinned upstream
-     * 8139too source. The compatibility core accepts either these or
-     * netdev_ops so newer Twilight drivers keep working unchanged. */
     int (*open)(struct net_device *dev);
     int (*stop)(struct net_device *dev);
     netdev_tx_t (*hard_start_xmit)(struct sk_buff *skb, struct net_device *dev);
@@ -113,6 +107,7 @@ struct net_device {
 
     struct net_device_stats stats;
     unsigned long trans_start;
+    unsigned long last_rx;
     unsigned long watchdog_timeo;
     unsigned int mtu;
     unsigned int flags;
@@ -146,15 +141,9 @@ void netif_wake_queue(struct net_device *dev);
 bool netif_queue_stopped(const struct net_device *dev);
 bool netif_running(const struct net_device *dev);
 
-static inline void netif_carrier_on(struct net_device *dev) {
-    if (dev != 0) dev->carrier = true;
-}
-static inline void netif_carrier_off(struct net_device *dev) {
-    if (dev != 0) dev->carrier = false;
-}
-static inline bool netif_carrier_ok(const struct net_device *dev) {
-    return dev != 0 && dev->carrier;
-}
+static inline void netif_carrier_on(struct net_device *dev) { if (dev != 0) dev->carrier = true; }
+static inline void netif_carrier_off(struct net_device *dev) { if (dev != 0) dev->carrier = false; }
+static inline bool netif_carrier_ok(const struct net_device *dev) { return dev != 0 && dev->carrier; }
 
 void netif_napi_add(struct net_device *dev,
                     struct napi_struct *napi,
@@ -189,6 +178,8 @@ bool linux_net_run_arp_self_test(void);
 #define netif_msg_tx_queued(tp) (((tp)->msg_enable & NETIF_MSG_TX_QUEUED) != 0)
 #define netif_msg_tx_err(tp)    (((tp)->msg_enable & NETIF_MSG_TX_ERR) != 0)
 #define netif_msg_rx_err(tp)    (((tp)->msg_enable & NETIF_MSG_RX_ERR) != 0)
+#define netif_msg_rx_status(tp) (((tp)->msg_enable & NETIF_MSG_RX_STATUS) != 0)
+#define netif_msg_intr(tp)      (((tp)->msg_enable & NETIF_MSG_INTR) != 0)
 
 #define netdev_info(dev, format, ...) \
     printk("[linux:net] %s: " format, (dev)->name, ##__VA_ARGS__)
