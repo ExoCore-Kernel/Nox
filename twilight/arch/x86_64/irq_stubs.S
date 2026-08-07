@@ -122,8 +122,67 @@ default_interrupt_stub:
 .size \name, .-\name
 .endm
 
+.macro LEGACY_IRQ_STUB n
+.global irq\n\()_stub
+.type irq\n\()_stub, @function
+irq\n\()_stub:
+    pushq %rax
+    pushq %rbx
+    pushq %rcx
+    pushq %rdx
+    pushq %rbp
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+
+    movq %rsp, %r15
+    andq $-16, %rsp
+    movq $\n, %rdi
+    call legacy_irq_dispatch
+    movq %r15, %rsp
+
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rbp
+    popq %rdx
+    popq %rcx
+    popq %rbx
+    popq %rax
+    iretq
+.size irq\n\()_stub, .-irq\n\()_stub
+.endm
+
 IRQ_STUB irq0_stub, pit_irq_handler
 IRQ_STUB irq1_stub, keyboard_irq_handler
+LEGACY_IRQ_STUB 2
+LEGACY_IRQ_STUB 3
+LEGACY_IRQ_STUB 4
+LEGACY_IRQ_STUB 5
+LEGACY_IRQ_STUB 6
+LEGACY_IRQ_STUB 7
+LEGACY_IRQ_STUB 8
+LEGACY_IRQ_STUB 9
+LEGACY_IRQ_STUB 10
+LEGACY_IRQ_STUB 11
+LEGACY_IRQ_STUB 12
+LEGACY_IRQ_STUB 13
+LEGACY_IRQ_STUB 14
+LEGACY_IRQ_STUB 15
 
 .section .rodata
 .global exception_stub_table
