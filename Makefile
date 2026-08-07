@@ -6,6 +6,8 @@ PYTHON := python3
 QEMU := qemu-system-x86_64
 LIMINE := limine
 PANIC_SELF_TEST ?= 0
+PMM_SELF_TEST ?= 1
+SCROLL_SELF_TEST ?= 0
 
 BUILD_DIR := build
 OBJ_DIR := $(BUILD_DIR)/obj
@@ -44,6 +46,8 @@ CFLAGS := \
 	-mno-sse2 \
 	-mcmodel=kernel \
 	-DTWILIGHT_PANIC_SELF_TEST=$(PANIC_SELF_TEST) \
+	-DTWILIGHT_PMM_SELF_TEST=$(PMM_SELF_TEST) \
+	-DTWILIGHT_SCROLL_SELF_TEST=$(SCROLL_SELF_TEST) \
 	-Itwilight/include
 
 ASFLAGS := \
