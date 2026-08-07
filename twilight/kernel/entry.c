@@ -6,7 +6,9 @@
 #include <twilight/framebuffer.h>
 #include <twilight/interrupts.h>
 #include <twilight/keyboard.h>
+#include <twilight/log.h>
 #include <twilight/panic.h>
+#include <twilight/timer.h>
 
 #ifndef TWILIGHT_PANIC_SELF_TEST
 #define TWILIGHT_PANIC_SELF_TEST 0
@@ -39,10 +41,6 @@ static __attribute__((noreturn)) void fatal_halt(void) {
     halt_forever();
 }
 
-static void boot_status(const char *text, size_t line, uint8_t r, uint8_t g, uint8_t b) {
-    font_draw_string(text, 48, 48 + (font_height() + 2u) * line, r, g, b);
-}
-
 void kmain(void) {
     interrupts_disable();
 
@@ -65,29 +63,38 @@ void kmain(void) {
         fatal_halt();
     }
 
-    font_draw_string("Hello, World!", 48, 48, 235, 235, 235);
-    boot_status("[1] framebuffer + font OK", 1, 150, 220, 150);
+    klog_init();
+    klog("Twilight kernel starting");
+    klog("Framebuffer initialized");
+    klog("Console font initialized");
 
 #if TWILIGHT_PANIC_SELF_TEST
     kernel_panic("Panic self-test: renderer is working");
 #endif
 
-    boot_status("[2] loading IDT...", 2, 180, 200, 255);
     idt_init();
-    boot_status("[3] IDT OK", 3, 150, 220, 150);
+    klog("IDT initialized");
 
     pic_init();
-    boot_status("[4] PIC OK", 4, 150, 220, 150);
+    klog("8259 PIC remapped; keyboard IRQ masked");
 
-    boot_status("[5] initializing PS/2 keyboard...", 5, 180, 200, 255);
+    pit_init(1000u);
+    klog("PIT configured for 1000 Hz uptime clock");
+
+    interrupts_enable();
+    while (timer_ticks() == 0) {
+        __asm__ volatile ("hlt");
+    }
+    klog("PIT IRQ0 active; uptime clock running");
+
+    klog("Initializing PS/2 keyboard");
     if (!ps2_keyboard_init()) {
         kernel_panic("PS/2 keyboard initialization failed or timed out");
     }
-    boot_status("[6] PS/2 keyboard ACK received", 6, 150, 220, 150);
+    klog("PS/2 keyboard ACK received");
 
-    boot_status("[7] enabling interrupts...", 7, 180, 200, 255);
-    interrupts_enable();
-    boot_status("[8] interrupts enabled - type below", 8, 150, 220, 150);
+    pic_unmask_irq(1);
+    klog("PS/2 keyboard IRQ1 enabled; type below");
 
     halt_forever();
 }
