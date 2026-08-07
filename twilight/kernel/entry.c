@@ -50,6 +50,10 @@ static __attribute__((noreturn)) void fatal_halt(void) {
     halt_forever();
 }
 
+static void checkpoint(const char *text, uint64_t line) {
+    font_draw_string(text, 32, 16 + line * (font_height() + 2u), 235, 235, 235);
+}
+
 void kmain(void) {
     interrupts_disable();
     (void)serial_init();
@@ -73,48 +77,52 @@ void kmain(void) {
         fatal_halt();
     }
 
-    /* Earliest possible visible marker, independent of the logger. */
-    font_draw_string("Twilight booting...", 32, 16, 235, 235, 235);
+    checkpoint("Twilight booting...", 0);
+    checkpoint("A: before cmdline response", 1);
 
     const char *cmdline = 0;
     if (cmdline_request.response != 0) {
+        checkpoint("B: cmdline response present", 2);
         cmdline = cmdline_request.response->cmdline;
+        checkpoint("C: cmdline pointer read", 3);
+    } else {
+        checkpoint("B: no cmdline response", 2);
     }
+
     const char *os_name = twilight_os_name_from_cmdline(cmdline);
+    (void)os_name;
+    checkpoint("D: OS name parsed", 4);
 
     klog_init();
-    twilight_print_version_banner(os_name);
-    klog("Framebuffer initialized");
-    klog("Console font initialized");
+    checkpoint("E: klog_init returned", 5);
 
-#if TWILIGHT_PANIC_SELF_TEST
-    kernel_panic("Panic self-test: renderer is working");
-#endif
-
+    /* Deliberately bypass version banner and klog while isolating the freeze. */
+    checkpoint("F: entering IDT init", 6);
     idt_init();
-    klog("IDT initialized");
+    checkpoint("G: IDT initialized", 7);
 
     pic_init();
-    klog("8259 PIC remapped; keyboard IRQ masked");
+    checkpoint("H: PIC initialized", 8);
 
     pit_init(1000u);
-    klog("PIT configured for 1000 Hz uptime clock");
+    checkpoint("I: PIT configured", 9);
 
     interrupts_enable();
+    checkpoint("J: interrupts enabled", 10);
+
     while (timer_ticks() == 0) {
         __asm__ volatile ("hlt");
     }
-    klog_enable_uptime();
-    klog("PIT IRQ0 active; uptime clock running");
+    checkpoint("K: PIT IRQ0 received", 11);
 
-    klog("Initializing PS/2 keyboard");
     if (!ps2_keyboard_init()) {
+        checkpoint("L: PS/2 init failed", 12);
         kernel_panic("PS/2 keyboard initialization failed or timed out");
     }
-    klog("PS/2 keyboard ACK received");
+    checkpoint("L: PS/2 ACK received", 12);
 
     pic_unmask_irq(1);
-    klog("PS/2 keyboard IRQ1 enabled; type below");
+    checkpoint("M: keyboard IRQ1 enabled", 13);
 
     halt_forever();
 }
