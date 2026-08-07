@@ -1,4 +1,14 @@
 .section .text
+
+.global default_interrupt_stub
+.type default_interrupt_stub, @function
+default_interrupt_stub:
+    cli
+1:
+    hlt
+    jmp 1b
+.size default_interrupt_stub, .-default_interrupt_stub
+
 .global irq1_stub
 .type irq1_stub, @function
 irq1_stub:
