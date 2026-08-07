@@ -33,8 +33,9 @@
 #define TPM_ST_SESSIONS    0x8002u
 #define TPM_RC_SUCCESS     0u
 
-#define TPM_RH_NULL 0x40000007u
-#define TPM_RS_PW   0x40000009u
+#define TPM_RH_OWNER 0x40000001u
+#define TPM_RH_NULL  0x40000007u
+#define TPM_RS_PW    0x40000009u
 
 #define TPM_SE_POLICY 0x01u
 #define TPMA_SESSION_CONTINUE 0x01u
@@ -53,8 +54,8 @@
 #define TPM_CC_FLUSH_CONTEXT      0x00000165u
 #define TPM_CC_START_AUTH_SESSION 0x00000176u
 #define TPM_CC_GET_RANDOM         0x0000017bu
-#define TPM_CC_PCR_EXTEND         0x00000182u
 #define TPM_CC_POLICY_PCR         0x0000017fu
+#define TPM_CC_PCR_EXTEND         0x00000182u
 #define TPM_CC_POLICY_GET_DIGEST  0x00000189u
 #define TPM_CC_ENCRYPT_DECRYPT2   0x00000193u
 
@@ -76,11 +77,10 @@
      TPMA_OBJECT_SENSITIVE_DATA_ORIGIN | TPMA_OBJECT_ADMIN_WITH_POLICY | \
      TPMA_OBJECT_NO_DA | TPMA_OBJECT_SIGN_ENCRYPT)
 
-#define TPM_PCR_FIRMWARE_POLICY 7u
 #define TPM_PCR_TWILIGHT_KERNEL 11u
 #define TPM_PCR_TWILIGHT_POLICY 12u
 
-#define TPM_VAULT_MAGIC 0x54564c54u /* TLVT */
+#define TPM_VAULT_MAGIC 0x54564c54u
 #define TPM_VAULT_VERSION 2u
 
 #define TPM_COMMAND_TIMEOUT_MS 30000u
@@ -226,15 +226,11 @@ static bool crb_execute(const uint8_t *command,
 
     if (!crb_command_ready()) return false;
     mmio_write32(CRB_CTRL_CANCEL, 0);
-
     copy_to_device(command_buffer, command, command_size);
     __atomic_thread_fence(__ATOMIC_RELEASE);
 
     mmio_write32(CRB_CTRL_START, CRB_CTRL_START_INVOKE);
-    if (!wait_register(CRB_CTRL_START,
-                       CRB_CTRL_START_INVOKE,
-                       0,
-                       TPM_COMMAND_TIMEOUT_MS)) {
+    if (!wait_register(CRB_CTRL_START, CRB_CTRL_START_INVOKE, 0, TPM_COMMAND_TIMEOUT_MS)) {
         return false;
     }
 
@@ -296,8 +292,8 @@ static void put_root_pcr_selection(struct command_writer *writer) {
     put_u32(writer, 1u);
     put_u16(writer, TPM_ALG_SHA256);
     put_u8(writer, 3u);
-    put_u8(writer, 0x80u); /* PCR 7 */
-    put_u8(writer, 0x18u); /* PCR 11 + PCR 12 */
+    put_u8(writer, 0x80u);
+    put_u8(writer, 0x18u);
     put_u8(writer, 0x00u);
 }
 
@@ -306,7 +302,6 @@ static bool response_parameter_window(const uint8_t *response,
                                       size_t *offset,
                                       size_t *size) {
     if (received < 10 || response == 0 || offset == 0 || size == 0) return false;
-
     if (read_be16(response) == TPM_ST_SESSIONS) {
         if (received < 14) return false;
         const uint32_t parameter_size = read_be32(&response[10]);
@@ -315,7 +310,6 @@ static bool response_parameter_window(const uint8_t *response,
         *size = parameter_size;
         return true;
     }
-
     *offset = 10u;
     *size = received - 10u;
     return true;
@@ -323,14 +317,12 @@ static bool response_parameter_window(const uint8_t *response,
 
 static bool tpm_flush_context(uint32_t handle) {
     if (handle == 0) return true;
-
     uint8_t command[16];
     uint8_t response[32];
     struct command_writer writer;
     begin_command(&writer, command, sizeof(command), TPM_ST_NO_SESSIONS, TPM_CC_FLUSH_CONTEXT);
     put_u32(&writer, handle);
     if (!finish_command(&writer)) return false;
-
     size_t received = 0;
     return crb_execute(command, writer.position, response, sizeof(response), &received) &&
            received >= 10 && status.last_response_code == TPM_RC_SUCCESS;
@@ -343,27 +335,21 @@ static bool start_policy_session(uint32_t *handle_out) {
     uint8_t command[64];
     uint8_t response[96];
     struct command_writer writer;
-    begin_command(&writer,
-                  command,
-                  sizeof(command),
-                  TPM_ST_NO_SESSIONS,
-                  TPM_CC_START_AUTH_SESSION);
+    begin_command(&writer, command, sizeof(command), TPM_ST_NO_SESSIONS, TPM_CC_START_AUTH_SESSION);
     put_u32(&writer, TPM_RH_NULL);
     put_u32(&writer, TPM_RH_NULL);
     put_u16(&writer, (uint16_t)sizeof(nonce));
     put_bytes(&writer, nonce, sizeof(nonce));
-    put_u16(&writer, 0); /* encryptedSalt */
+    put_u16(&writer, 0);
     put_u8(&writer, TPM_SE_POLICY);
     put_u16(&writer, TPM_ALG_NULL);
     put_u16(&writer, TPM_ALG_SHA256);
     zero_bytes(nonce, sizeof(nonce));
-
     if (!finish_command(&writer)) return false;
 
     size_t received = 0;
     if (!crb_execute(command, writer.position, response, sizeof(response), &received)) return false;
     if (status.last_response_code != TPM_RC_SUCCESS || received < 16) return false;
-
     const uint32_t handle = read_be32(&response[10]);
     if ((handle & 0xff000000u) != 0x03000000u) return false;
     *handle_out = handle;
@@ -376,10 +362,9 @@ static bool policy_pcr_current(uint32_t session_handle) {
     struct command_writer writer;
     begin_command(&writer, command, sizeof(command), TPM_ST_NO_SESSIONS, TPM_CC_POLICY_PCR);
     put_u32(&writer, session_handle);
-    put_u16(&writer, 0); /* empty digest means current PCR values */
+    put_u16(&writer, 0);
     put_root_pcr_selection(&writer);
     if (!finish_command(&writer)) return false;
-
     size_t received = 0;
     return crb_execute(command, writer.position, response, sizeof(response), &received) &&
            received >= 10 && status.last_response_code == TPM_RC_SUCCESS;
@@ -389,14 +374,9 @@ static bool policy_get_digest(uint32_t session_handle, uint8_t digest[TPM_SHA256
     uint8_t command[16];
     uint8_t response[64];
     struct command_writer writer;
-    begin_command(&writer,
-                  command,
-                  sizeof(command),
-                  TPM_ST_NO_SESSIONS,
-                  TPM_CC_POLICY_GET_DIGEST);
+    begin_command(&writer, command, sizeof(command), TPM_ST_NO_SESSIONS, TPM_CC_POLICY_GET_DIGEST);
     put_u32(&writer, session_handle);
     if (!finish_command(&writer)) return false;
-
     size_t received = 0;
     if (!crb_execute(command, writer.position, response, sizeof(response), &received)) return false;
     if (status.last_response_code != TPM_RC_SUCCESS || received < 12) return false;
@@ -409,7 +389,6 @@ static bool policy_get_digest(uint32_t session_handle, uint8_t digest[TPM_SHA256
 static bool current_root_policy_digest(uint8_t digest[TPM_SHA256_DIGEST_SIZE]) {
     uint32_t session = 0;
     if (!start_policy_session(&session)) return false;
-
     bool success = policy_pcr_current(session) && policy_get_digest(session, digest);
     if (!tpm_flush_context(session)) success = false;
     return success;
@@ -438,27 +417,24 @@ static bool pcr_extend_sha256(uint32_t pcr_index,
     put_u16(&writer, TPM_ALG_SHA256);
     put_bytes(&writer, digest, TPM_SHA256_DIGEST_SIZE);
     if (!finish_command(&writer)) return false;
-
     size_t received = 0;
     return crb_execute(command, writer.position, response, sizeof(response), &received) &&
            received >= 10 && status.last_response_code == TPM_RC_SUCCESS;
 }
 
 static bool create_symmetric_policy_key(
+    uint32_t hierarchy,
     const uint8_t policy_digest[TPM_SHA256_DIGEST_SIZE],
     uint32_t *handle_out) {
     uint8_t command[192];
     uint8_t response[1024];
     struct command_writer writer;
-
     begin_command(&writer, command, sizeof(command), TPM_ST_SESSIONS, TPM_CC_CREATE_PRIMARY);
-    put_u32(&writer, TPM_RH_NULL);
+    put_u32(&writer, hierarchy);
     put_empty_password_session(&writer);
-
     put_u16(&writer, 4u);
     put_u16(&writer, 0);
     put_u16(&writer, 0);
-
     put_u16(&writer, 50u);
     put_u16(&writer, TPM_ALG_SYMCIPHER);
     put_u16(&writer, TPM_ALG_SHA256);
@@ -469,15 +445,12 @@ static bool create_symmetric_policy_key(
     put_u16(&writer, 128u);
     put_u16(&writer, TPM_ALG_CFB);
     put_u16(&writer, 0);
-
     put_u16(&writer, 0);
     put_u32(&writer, 0);
     if (!finish_command(&writer)) return false;
-
     size_t received = 0;
     if (!crb_execute(command, writer.position, response, sizeof(response), &received)) return false;
     if (status.last_response_code != TPM_RC_SUCCESS || received < 14) return false;
-
     const uint32_t handle = read_be32(&response[10]);
     if ((handle & 0xff000000u) != 0x80000000u) return false;
     *handle_out = handle;
@@ -485,20 +458,18 @@ static bool create_symmetric_policy_key(
 }
 
 static bool create_hmac_policy_key(
+    uint32_t hierarchy,
     const uint8_t policy_digest[TPM_SHA256_DIGEST_SIZE],
     uint32_t *handle_out) {
     uint8_t command[192];
     uint8_t response[1024];
     struct command_writer writer;
-
     begin_command(&writer, command, sizeof(command), TPM_ST_SESSIONS, TPM_CC_CREATE_PRIMARY);
-    put_u32(&writer, TPM_RH_NULL);
+    put_u32(&writer, hierarchy);
     put_empty_password_session(&writer);
-
     put_u16(&writer, 4u);
     put_u16(&writer, 0);
     put_u16(&writer, 0);
-
     put_u16(&writer, 48u);
     put_u16(&writer, TPM_ALG_KEYEDHASH);
     put_u16(&writer, TPM_ALG_SHA256);
@@ -508,18 +479,33 @@ static bool create_hmac_policy_key(
     put_u16(&writer, TPM_ALG_HMAC);
     put_u16(&writer, TPM_ALG_SHA256);
     put_u16(&writer, 0);
-
     put_u16(&writer, 0);
     put_u32(&writer, 0);
     if (!finish_command(&writer)) return false;
-
     size_t received = 0;
     if (!crb_execute(command, writer.position, response, sizeof(response), &received)) return false;
     if (status.last_response_code != TPM_RC_SUCCESS || received < 14) return false;
-
     const uint32_t handle = read_be32(&response[10]);
     if ((handle & 0xff000000u) != 0x80000000u) return false;
     *handle_out = handle;
+    return true;
+}
+
+static bool create_policy_key_pair(
+    uint32_t hierarchy,
+    const uint8_t policy_digest[TPM_SHA256_DIGEST_SIZE],
+    uint32_t *encryption_out,
+    uint32_t *hmac_out) {
+    uint32_t encryption = 0;
+    uint32_t hmac = 0;
+    if (!create_symmetric_policy_key(hierarchy, policy_digest, &encryption) ||
+        !create_hmac_policy_key(hierarchy, policy_digest, &hmac)) {
+        if (encryption != 0) (void)tpm_flush_context(encryption);
+        if (hmac != 0) (void)tpm_flush_context(hmac);
+        return false;
+    }
+    *encryption_out = encryption;
+    *hmac_out = hmac;
     return true;
 }
 
@@ -535,6 +521,7 @@ static void trip_root_integrity_failure(void) {
     status.integrity_failure = true;
     status.root_of_trust_established = false;
     status.pcr_policy_bound = false;
+    status.persistent_hierarchy = false;
     destroy_vault_keys();
 }
 
@@ -548,13 +535,10 @@ static bool encrypt_decrypt_command(uint32_t command_code,
     uint8_t command[640];
     uint8_t response[640];
     struct command_writer writer;
-
     if (size > TPM_VAULT_MAX_PLAINTEXT || size > UINT16_MAX) return false;
-
     begin_command(&writer, command, sizeof(command), TPM_ST_SESSIONS, command_code);
     put_u32(&writer, vault_encryption_handle);
     put_policy_session_auth(&writer, policy_session);
-
     if (command_code == TPM_CC_ENCRYPT_DECRYPT2) {
         put_u16(&writer, (uint16_t)size);
         put_bytes(&writer, input, size);
@@ -570,18 +554,14 @@ static bool encrypt_decrypt_command(uint32_t command_code,
         put_u16(&writer, (uint16_t)size);
         put_bytes(&writer, input, size);
     }
-
     if (!finish_command(&writer)) return false;
-
     size_t received = 0;
     if (!crb_execute(command, writer.position, response, sizeof(response), &received)) return false;
     if (status.last_response_code != TPM_RC_SUCCESS) return false;
-
     size_t parameters = 0;
     size_t parameter_size = 0;
     if (!response_parameter_window(response, received, &parameters, &parameter_size)) return false;
     if (parameter_size < 2) return false;
-
     const uint16_t output_size = read_be16(&response[parameters]);
     if (output_size != size || parameter_size < 2u + output_size) return false;
     for (size_t i = 0; i < size; ++i) output[i] = response[parameters + 2u + i];
@@ -596,13 +576,7 @@ static bool policy_crypt_once(uint32_t command_code,
                               uint8_t *output) {
     uint32_t session = 0;
     if (!current_root_policy_session(&session)) return false;
-    const bool success = encrypt_decrypt_command(command_code,
-                                                 session,
-                                                 decrypt,
-                                                 iv,
-                                                 input,
-                                                 size,
-                                                 output);
+    const bool success = encrypt_decrypt_command(command_code, session, decrypt, iv, input, size, output);
     (void)tpm_flush_context(session);
     return success;
 }
@@ -612,29 +586,11 @@ static bool vault_crypt(bool decrypt,
                         const uint8_t *input,
                         size_t size,
                         uint8_t *output) {
-    if (!status.vault_ready || !status.root_of_trust_established ||
-        vault_encryption_handle == 0) {
+    if (!status.vault_ready || !status.root_of_trust_established || vault_encryption_handle == 0) {
         return false;
     }
-
-    if (policy_crypt_once(TPM_CC_ENCRYPT_DECRYPT2,
-                          decrypt,
-                          iv,
-                          input,
-                          size,
-                          output)) {
-        return true;
-    }
-
-    if (policy_crypt_once(TPM_CC_ENCRYPT_DECRYPT,
-                          decrypt,
-                          iv,
-                          input,
-                          size,
-                          output)) {
-        return true;
-    }
-
+    if (policy_crypt_once(TPM_CC_ENCRYPT_DECRYPT2, decrypt, iv, input, size, output)) return true;
+    if (policy_crypt_once(TPM_CC_ENCRYPT_DECRYPT, decrypt, iv, input, size, output)) return true;
     trip_root_integrity_failure();
     return false;
 }
@@ -647,7 +603,6 @@ static bool hmac_command(uint32_t policy_session,
     uint8_t response[96];
     struct command_writer writer;
     if (size > 512u || size > UINT16_MAX) return false;
-
     begin_command(&writer, command, sizeof(command), TPM_ST_SESSIONS, TPM_CC_HMAC);
     put_u32(&writer, vault_hmac_handle);
     put_policy_session_auth(&writer, policy_session);
@@ -655,20 +610,16 @@ static bool hmac_command(uint32_t policy_session,
     put_bytes(&writer, input, size);
     put_u16(&writer, TPM_ALG_SHA256);
     if (!finish_command(&writer)) return false;
-
     size_t received = 0;
     if (!crb_execute(command, writer.position, response, sizeof(response), &received)) return false;
     if (status.last_response_code != TPM_RC_SUCCESS) return false;
-
     size_t parameters = 0;
     size_t parameter_size = 0;
     if (!response_parameter_window(response, received, &parameters, &parameter_size)) return false;
     if (parameter_size < 2u + TPM_SHA256_DIGEST_SIZE) return false;
     const uint16_t digest_size = read_be16(&response[parameters]);
     if (digest_size != TPM_SHA256_DIGEST_SIZE) return false;
-    for (size_t i = 0; i < TPM_SHA256_DIGEST_SIZE; ++i) {
-        output[i] = response[parameters + 2u + i];
-    }
+    for (size_t i = 0; i < TPM_SHA256_DIGEST_SIZE; ++i) output[i] = response[parameters + 2u + i];
     return true;
 }
 
@@ -678,13 +629,11 @@ static bool vault_hmac(const uint8_t *input,
     if (!status.vault_ready || !status.root_of_trust_established || vault_hmac_handle == 0) {
         return false;
     }
-
     uint32_t session = 0;
     if (!current_root_policy_session(&session)) {
         trip_root_integrity_failure();
         return false;
     }
-
     const bool success = hmac_command(session, input, size, output);
     (void)tpm_flush_context(session);
     if (!success) trip_root_integrity_failure();
@@ -695,10 +644,7 @@ static bool build_vault_mac_input(const struct tpm_protected_blob *blob,
                                   uint8_t output[512],
                                   size_t *size_out) {
     if (blob == 0 || output == 0 || size_out == 0) return false;
-    if (blob->plaintext_length == 0 || blob->plaintext_length > TPM_VAULT_MAX_PLAINTEXT) {
-        return false;
-    }
-
+    if (blob->plaintext_length == 0 || blob->plaintext_length > TPM_VAULT_MAX_PLAINTEXT) return false;
     struct command_writer writer = {
         .buffer = output,
         .capacity = 512u,
@@ -720,13 +666,10 @@ static void disable_transport(void) {
     status.transport_ready = false;
     status.root_of_trust_established = false;
     status.pcr_policy_bound = false;
-
-    if (response_mapping != 0 && !response_shares_command_mapping) {
-        (void)mmio_unmap(response_mapping);
-    }
+    status.persistent_hierarchy = false;
+    if (response_mapping != 0 && !response_shares_command_mapping) (void)mmio_unmap(response_mapping);
     if (command_mapping != 0) (void)mmio_unmap(command_mapping);
     if (crb_mapping != 0) (void)mmio_unmap(crb_mapping);
-
     response_mapping = 0;
     command_mapping = 0;
     crb_mapping = 0;
@@ -754,19 +697,14 @@ bool tpm_init(void) {
     root_attempted = false;
 
     if (!acpi_is_initialized() || !mmio_is_initialized()) return true;
-
     const struct acpi_sdt_header *header = acpi_find_table("TPM2");
-    if (header == 0) return true;
-    if (header->length < sizeof(struct acpi_tpm2_table)) return true;
+    if (header == 0 || header->length < sizeof(struct acpi_tpm2_table)) return true;
 
     const struct acpi_tpm2_table *table = (const struct acpi_tpm2_table *)header;
     status.detected = true;
     status.start_method = table->start_method;
     status.control_area_physical = table->control_area_address;
-
-    if (table->start_method != TPM2_START_METHOD_CRB || table->control_area_address < 0x40ull) {
-        return true;
-    }
+    if (table->start_method != TPM2_START_METHOD_CRB || table->control_area_address < 0x40ull) return true;
 
     const uint64_t register_base = table->control_area_address - 0x40ull;
     crb_mapping = mmio_map(register_base, 0x80u);
@@ -784,13 +722,10 @@ bool tpm_init(void) {
 
     command_capacity = mmio_read32(CRB_CTRL_CMD_SIZE);
     response_capacity = mmio_read32(CRB_CTRL_RSP_SIZE);
-    const uint64_t command_physical =
-        (uint64_t)mmio_read32(CRB_CTRL_CMD_LOW) |
-        ((uint64_t)mmio_read32(CRB_CTRL_CMD_HIGH) << 32);
-    const uint64_t response_physical =
-        (uint64_t)mmio_read32(CRB_CTRL_RSP_LOW) |
-        ((uint64_t)mmio_read32(CRB_CTRL_RSP_HIGH) << 32);
-
+    const uint64_t command_physical = (uint64_t)mmio_read32(CRB_CTRL_CMD_LOW) |
+                                      ((uint64_t)mmio_read32(CRB_CTRL_CMD_HIGH) << 32);
+    const uint64_t response_physical = (uint64_t)mmio_read32(CRB_CTRL_RSP_LOW) |
+                                       ((uint64_t)mmio_read32(CRB_CTRL_RSP_HIGH) << 32);
     if (command_capacity < 64u || response_capacity < 64u ||
         command_capacity > 65536u || response_capacity > 65536u ||
         command_physical == 0 || response_physical == 0) {
@@ -819,7 +754,6 @@ bool tpm_init(void) {
     }
 
     status.transport_ready = true;
-
     uint8_t probe_random[8];
     if (!tpm_get_random(probe_random, sizeof(probe_random))) {
         zero_bytes(probe_random, sizeof(probe_random));
@@ -838,37 +772,30 @@ bool tpm_get_random(void *buffer, size_t size) {
     if (!status.transport_ready || buffer == 0) return false;
     uint8_t *out = (uint8_t *)buffer;
     size_t produced = 0;
-
     while (produced < size) {
         const size_t remaining = size - produced;
         const uint16_t request = (uint16_t)(remaining > 64u ? 64u : remaining);
-
         uint8_t command[16];
         uint8_t response[96];
         struct command_writer writer;
         begin_command(&writer, command, sizeof(command), TPM_ST_NO_SESSIONS, TPM_CC_GET_RANDOM);
         put_u16(&writer, request);
         if (!finish_command(&writer)) return false;
-
         size_t received = 0;
         if (!crb_execute(command, writer.position, response, sizeof(response), &received)) return false;
         if (status.last_response_code != TPM_RC_SUCCESS || received < 12) return false;
-
         const uint16_t returned = read_be16(&response[10]);
         if (returned == 0 || returned > request || received < 12u + returned) return false;
         for (size_t i = 0; i < returned; ++i) out[produced + i] = response[12u + i];
         produced += returned;
     }
-
     return true;
 }
 
 bool tpm_establish_root_of_trust(
     const uint8_t kernel_measurement[TPM_SHA256_DIGEST_SIZE],
     const uint8_t security_policy_measurement[TPM_SHA256_DIGEST_SIZE]) {
-    if (!status.transport_ready || kernel_measurement == 0 || security_policy_measurement == 0) {
-        return false;
-    }
+    if (!status.transport_ready || kernel_measurement == 0 || security_policy_measurement == 0) return false;
     if (root_attempted) return status.root_of_trust_established;
     root_attempted = true;
 
@@ -884,19 +811,27 @@ bool tpm_establish_root_of_trust(
 
     uint32_t encryption_handle = 0;
     uint32_t hmac_handle = 0;
-    bool success = create_symmetric_policy_key(policy_digest, &encryption_handle) &&
-                   create_hmac_policy_key(policy_digest, &hmac_handle);
-    zero_bytes(policy_digest, sizeof(policy_digest));
-
-    if (!success) {
-        if (encryption_handle != 0) (void)tpm_flush_context(encryption_handle);
-        if (hmac_handle != 0) (void)tpm_flush_context(hmac_handle);
-        return false;
+    bool persistent = create_policy_key_pair(TPM_RH_OWNER,
+                                             policy_digest,
+                                             &encryption_handle,
+                                             &hmac_handle);
+    if (!persistent) {
+        encryption_handle = 0;
+        hmac_handle = 0;
+        if (!create_policy_key_pair(TPM_RH_NULL,
+                                    policy_digest,
+                                    &encryption_handle,
+                                    &hmac_handle)) {
+            zero_bytes(policy_digest, sizeof(policy_digest));
+            return false;
+        }
     }
+    zero_bytes(policy_digest, sizeof(policy_digest));
 
     vault_encryption_handle = encryption_handle;
     vault_hmac_handle = hmac_handle;
     status.pcr_policy_bound = true;
+    status.persistent_hierarchy = persistent;
     status.root_of_trust_established = true;
     status.vault_ready = true;
     status.integrity_failure = false;
@@ -908,26 +843,18 @@ bool tpm_vault_protect(const void *plaintext,
                        struct tpm_protected_blob *out) {
     if (!status.vault_ready || plaintext == 0 || out == 0) return false;
     if (size == 0 || size > TPM_VAULT_MAX_PLAINTEXT) return false;
-
     zero_bytes(out, sizeof(*out));
     out->magic = TPM_VAULT_MAGIC;
     out->version = TPM_VAULT_VERSION;
     out->plaintext_length = (uint16_t)size;
-
     if (!tpm_get_random(out->iv, sizeof(out->iv))) {
         zero_bytes(out, sizeof(*out));
         return false;
     }
-
-    if (!vault_crypt(false,
-                     out->iv,
-                     (const uint8_t *)plaintext,
-                     size,
-                     out->ciphertext)) {
+    if (!vault_crypt(false, out->iv, (const uint8_t *)plaintext, size, out->ciphertext)) {
         zero_bytes(out, sizeof(*out));
         return false;
     }
-
     uint8_t mac_input[512];
     size_t mac_size = 0;
     zero_bytes(mac_input, sizeof(mac_input));
@@ -955,16 +882,12 @@ bool tpm_vault_unprotect(const struct tpm_protected_blob *blob,
     size_t mac_size = 0;
     zero_bytes(mac_input, sizeof(mac_input));
     zero_bytes(expected_tag, sizeof(expected_tag));
-
-    bool authenticated = build_vault_mac_input(blob, mac_input, &mac_size) &&
-                         vault_hmac(mac_input, mac_size, expected_tag) &&
-                         bytes_equal(expected_tag,
-                                     blob->authentication_tag,
-                                     TPM_SHA256_DIGEST_SIZE);
+    const bool authenticated = build_vault_mac_input(blob, mac_input, &mac_size) &&
+                               vault_hmac(mac_input, mac_size, expected_tag) &&
+                               bytes_equal(expected_tag, blob->authentication_tag, TPM_SHA256_DIGEST_SIZE);
     zero_bytes(mac_input, sizeof(mac_input));
     zero_bytes(expected_tag, sizeof(expected_tag));
     if (!authenticated) return false;
-
     if (!vault_crypt(true,
                      blob->iv,
                      blob->ciphertext,
@@ -972,14 +895,12 @@ bool tpm_vault_unprotect(const struct tpm_protected_blob *blob,
                      (uint8_t *)plaintext)) {
         return false;
     }
-
     if (size_out != 0) *size_out = blob->plaintext_length;
     return true;
 }
 
 bool tpm_vault_self_test(void) {
     if (!status.vault_ready || !status.root_of_trust_established) return false;
-
     uint8_t plaintext[32];
     uint8_t recovered[32];
     for (size_t i = 0; i < sizeof(plaintext); ++i) plaintext[i] = (uint8_t)(0x31u + i * 7u);
@@ -988,28 +909,15 @@ bool tpm_vault_self_test(void) {
     struct tpm_protected_blob blob;
     bool success = tpm_vault_protect(plaintext, sizeof(plaintext), &blob);
     size_t recovered_size = 0;
-    if (success) {
-        success = tpm_vault_unprotect(&blob,
-                                      recovered,
-                                      sizeof(recovered),
-                                      &recovered_size);
-    }
-    if (success) {
-        success = recovered_size == sizeof(plaintext) &&
-                  bytes_equal(plaintext, recovered, sizeof(plaintext));
-    }
+    if (success) success = tpm_vault_unprotect(&blob, recovered, sizeof(recovered), &recovered_size);
+    if (success) success = recovered_size == sizeof(plaintext) && bytes_equal(plaintext, recovered, sizeof(plaintext));
 
     if (success) {
         struct tpm_protected_blob tampered = blob;
         tampered.ciphertext[0] ^= 0x80u;
         zero_bytes(recovered, sizeof(recovered));
         recovered_size = 0;
-        if (tpm_vault_unprotect(&tampered,
-                                recovered,
-                                sizeof(recovered),
-                                &recovered_size)) {
-            success = false;
-        }
+        if (tpm_vault_unprotect(&tampered, recovered, sizeof(recovered), &recovered_size)) success = false;
         zero_bytes(&tampered, sizeof(tampered));
     }
 
@@ -1021,6 +929,7 @@ bool tpm_vault_self_test(void) {
         destroy_vault_keys();
         status.root_of_trust_established = false;
         status.pcr_policy_bound = false;
+        status.persistent_hierarchy = false;
         return false;
     }
     return true;
