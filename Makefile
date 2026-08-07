@@ -27,6 +27,8 @@ FONT_C := $(GEN_DIR)/font_blob.c
 VERSION_C := $(GEN_DIR)/version_blob.c
 UPSTREAM_8139_C := $(GEN_DIR)/upstream/8139too.c
 UPSTREAM_8139_O := $(OBJ_DIR)/generated/upstream/8139too.o
+UPSTREAM_TEST_BUILD_DIR := build/upstream-8139
+UPSTREAM_TEST_ISO := $(UPSTREAM_TEST_BUILD_DIR)/nox.iso
 
 C_SOURCES := $(shell find twilight -type f -name '*.c' ! -path 'twilight/src/*' -print)
 ifeq ($(UPSTREAM_8139),1)
@@ -192,13 +194,12 @@ run-ethernet-test: iso
 	@echo "Running Twilight with QEMU RTL8139 + user-mode Ethernet for Linux 8139too bring-up"
 	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-netdev user,id=noxnet -device rtl8139,netdev=noxnet,mac=52:54:00:12:34:56" sh scripts/run-qemu.sh auto pc $(ISO)
 
-# Strict compatibility test: recursive make reparses this file with
-# UPSTREAM_8139=1, excludes Twilight's port, fetches/verifies the exact Linux
-# v2.6.24 Git blob, and compiles that source byte-for-byte unchanged.
+# Strict compatibility test: build into an isolated tree so normal and
+# upstream-driver kernels can never be mistaken for each other by Make.
 run-upstream-ethernet-test:
-	@$(MAKE) UPSTREAM_8139=1 iso
+	@$(MAKE) BUILD_DIR=$(UPSTREAM_TEST_BUILD_DIR) UPSTREAM_8139=1 iso
 	@echo "Running Twilight with UNMODIFIED upstream Linux v2.6.24 8139too.c"
-	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-netdev user,id=noxnet -device rtl8139,netdev=noxnet,mac=52:54:00:12:34:56" sh scripts/run-qemu.sh auto pc $(ISO)
+	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-netdev user,id=noxnet -device rtl8139,netdev=noxnet,mac=52:54:00:12:34:56" sh scripts/run-qemu.sh auto pc $(UPSTREAM_TEST_ISO)
 
 run-tpm: iso
 	@echo "Running Twilight with persistent emulated TPM 2.0 (CRB frontend)"
@@ -215,4 +216,4 @@ check-tools:
 	@echo "Toolchain ready: clang + ld.lld + python3"
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf build
