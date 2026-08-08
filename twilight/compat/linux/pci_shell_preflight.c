@@ -1,0 +1,38 @@
+#include <stdbool.h>
+
+#include <linux/pci.h>
+#include <linux/printk.h>
+#include <twilight/linux_storage.h>
+
+void linux_pci_report_bindings(void);
+
+#if defined(TWILIGHT_BUSYBOX_SELF_TEST) && TWILIGHT_BUSYBOX_SELF_TEST
+/*
+ * Interactive shell builds deliberately expose the shell as the only named
+ * module_init() subsection.  This exact, ordinary initcall runs immediately
+ * before that shell initcall, so PCI matching/probe is observable before Bash
+ * blocks the rest of linux_driver_runtime_init().
+ *
+ * linux_pci_register_builtin_drivers() is idempotent: when the runtime reaches
+ * its normal registration pass after the user exits, already registered
+ * drivers are simply ignored.
+ */
+static int linux_pci_shell_preflight(void) {
+    const int result = linux_pci_register_builtin_drivers();
+    if (result != 0) {
+        pr_err("PCI shell preflight: built-in driver registration failed: %d", result);
+        linux_pci_report_bindings();
+        return result;
+    }
+
+    if (linux_storage_publish_block_devices())
+        pr_info("PCI shell preflight: block device(s) published after probe");
+
+    linux_pci_report_bindings();
+    pr_info("PCI shell preflight complete; entering interactive Linux userspace next");
+    return 0;
+}
+
+static int (* const __twilight_pci_shell_preflight_initcall)(void)
+__attribute__((used, section(".twilight_initcalls"))) = linux_pci_shell_preflight;
+#endif
