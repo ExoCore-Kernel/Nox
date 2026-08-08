@@ -17,6 +17,16 @@
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_cmnd.h>
 
+/* Linux libata supplies these tracing helpers to low-level drivers. Keep them
+ * compile-time disabled for Twilight's normal serial output while preserving
+ * the source API expected by an untouched ahci.c. */
+#ifndef DPRINTK
+#define DPRINTK(fmt, args...) do { } while (0)
+#endif
+#ifndef VPRINTK
+#define VPRINTK(fmt, args...) do { } while (0)
+#endif
+
 #define ATA_TAG_POISON 0xfafbfcfdU
 
 enum {
