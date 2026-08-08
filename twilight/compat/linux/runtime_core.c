@@ -5,6 +5,7 @@
 #include <linux/printk.h>
 #include <twilight/irq.h>
 #include <twilight/linux_compat.h>
+#include <twilight/linux_storage.h>
 
 void linux_workqueue_poll(void);
 void linux_timer_poll(void);
@@ -57,6 +58,12 @@ bool linux_driver_runtime_init(void) {
         pr_err("built-in Linux PCI driver registration failed: %d", result);
         runtime_initializing = false;
         return false;
+    }
+
+    /* PCI probe has now had a chance to create libata hosts. Publishing them
+     * here keeps the generic Twilight block layer independent of ahci.c. */
+    if (linux_storage_publish_block_devices()) {
+        pr_info("Linux storage bridge published block device(s) after PCI probe");
     }
 
     runtime_initialized = true;
