@@ -32,6 +32,11 @@ static void unlock_irqrestore(uint64_t flags) {
     if ((flags & (1ull << 9)) != 0) __asm__ volatile ("sti" : : : "memory");
 }
 
+static bool linux_irq_number_supported(unsigned int irq) {
+    if (irq >= 2u && irq < 16u) return true;
+    return irq <= 0xffu && irq_is_msi_vector((uint8_t)irq);
+}
+
 static bool linux_irq_bridge(uint8_t irq, void *context) {
     struct linux_irq_registration *registration =
         (struct linux_irq_registration *)context;
@@ -45,7 +50,7 @@ int request_irq(unsigned int irq,
                 unsigned long flags,
                 const char *name,
                 void *dev_id) {
-    if (handler == 0 || irq >= 16u || irq < 2u) return -EINVAL;
+    if (handler == 0 || !linux_irq_number_supported(irq)) return -EINVAL;
     if (!irq_core_is_initialized()) return -ENODEV;
 
     const uint64_t saved_flags = lock_irqsave();
@@ -86,7 +91,7 @@ int request_irq(unsigned int irq,
 }
 
 void free_irq(unsigned int irq, void *dev_id) {
-    if (irq >= 16u || irq < 2u) return;
+    if (!linux_irq_number_supported(irq)) return;
 
     const uint64_t saved_flags = lock_irqsave();
     for (size_t i = 0; i < LINUX_IRQ_REGISTRATIONS; ++i) {
