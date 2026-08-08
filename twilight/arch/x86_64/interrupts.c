@@ -88,6 +88,19 @@ void idt_init(void) {
 }
 
 void pic_init(void) {
+    /* This API name predates native IOAPIC support, but it is the platform's
+     * early interrupt-controller entry point. Prefer ACPI MADT + IOAPIC when
+     * available (q35/modern PCs) and fall back to the 8259 only when native
+     * APIC routing cannot be established. Existing callers and Linux IRQ
+     * compatibility code therefore remain controller-agnostic. */
+    if (ioapic_is_active() || ioapic_init()) {
+        /* ioapic_init() masks every route initially. IRQ0 is the only line the
+         * early boot contract wants live; IRQ1 and PCI lines are unmasked by
+         * their owners later. */
+        (void)ioapic_unmask_legacy_irq(0);
+        return;
+    }
+
     outb(0x20, 0x11); io_wait();
     outb(0xa0, 0x11); io_wait();
     outb(0x21, 0x20); io_wait();
