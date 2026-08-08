@@ -173,7 +173,7 @@ int linux_pci_register_builtin_drivers(void) {
 
     int first_error = 0;
     for (struct pci_driver **entry = __twilight_pci_drivers_start;
-         entry < __twilight_pci_drivers_end[];
+         entry < __twilight_pci_drivers_end;
          ++entry) {
         if (*entry == 0) continue;
         const int result = pci_register_driver(*entry);
