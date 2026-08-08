@@ -23,14 +23,15 @@ def main() -> int:
         f.seek(0)
         sector = bytearray(512)
         sector[: len(MARKER)] = MARKER
-        # Give the sector a conventional boot signature too. The AHCI proof
-        # does not depend on it, but it makes sector zero easier to inspect.
-        sector[510] = 0x55
-        sector[511] = 0xAA
+        # Deliberately do NOT write an MBR 0x55AA signature here. This disk is
+        # data-only test media. Marking it bootable can make legacy BIOS choose
+        # it ahead of the Limine CD and execute the NOXAHCI marker as boot code,
+        # producing a completely silent QEMU boot before Twilight ever starts.
         f.write(sector)
 
     print(f"Created AHCI test disk: {path} ({SIZE // (1024 * 1024)} MiB)")
     print(f"LBA0 marker: {MARKER.decode('ascii').strip()}")
+    print("AHCI test disk intentionally has no BIOS boot signature")
     return 0
 
 
