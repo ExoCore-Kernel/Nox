@@ -52,9 +52,7 @@ user_mode_enter:
     mov %ax, %ds
     mov %ax, %es
 
-    /* IRETQ frame for CPL3: SS, RSP, RFLAGS, CS, RIP. Keep IF clear during
-     * the early userspace tests so external IRQs cannot interleave until the
-     * process/interrupt scheduler path is ready. */
+    /* Early self-tests deliberately enter CPL3 with IF clear. */
     pushq $0x1b
     pushq %r9
     pushq $0x2
@@ -62,6 +60,45 @@ user_mode_enter:
     pushq %r8
     iretq
 .size user_mode_enter, .-user_mode_enter
+
+/* Interactive processes need hardware input while running at CPL3. This entry
+ * is identical to user_mode_enter except its initial userspace RFLAGS has IF
+ * set. SYSCALL saves that flag in R11; FMASK clears IF only while the kernel is
+ * servicing the syscall and SYSRETQ restores the userspace value. */
+.global user_mode_enter_interruptible
+.type user_mode_enter_interruptible, @function
+user_mode_enter_interruptible:
+    pushq %rbx
+    pushq %rbp
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+
+    movq %rsp, user_saved_kernel_rsp(%rip)
+    movq %rcx, user_saved_kernel_cr3(%rip)
+    movq %rdx, user_saved_user_cr3(%rip)
+
+    movq %rdi, %r8
+    movq %rsi, %r9
+
+    leaq user_transition_stack_end(%rip), %rsp
+    andq $-16, %rsp
+    movq %rsp, gdt_tss+4(%rip)
+
+    movq %rdx, %cr3
+
+    mov $0x1b, %ax
+    mov %ax, %ds
+    mov %ax, %es
+
+    pushq $0x1b
+    pushq %r9
+    pushq $0x202
+    pushq $0x23
+    pushq %r8
+    iretq
+.size user_mode_enter_interruptible, .-user_mode_enter_interruptible
 
 .global int80_stub
 .type int80_stub, @function
@@ -207,7 +244,7 @@ linux_syscall_entry:
 
 .Llinux_return_to_kernel:
     /* exit/exit_group do not return to userspace. Restore the CR3 and original
-     * kernel call stack saved by user_mode_enter(). */
+     * kernel call stack saved by either user-mode entry helper. */
     jmp .Lrestore_original_kernel_context
 .size linux_syscall_entry, .-linux_syscall_entry
 
@@ -222,7 +259,7 @@ linux_syscall_entry:
 
     movq user_saved_kernel_rsp(%rip), %rsp
 
-    /* Restore the callee-saved kernel state saved by user_mode_enter(). */
+    /* Restore the callee-saved kernel state saved by the user-mode entry. */
     popq %r15
     popq %r14
     popq %r13
