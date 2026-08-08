@@ -10,6 +10,7 @@ PMM_SELF_TEST ?= 1
 VMM_SELF_TEST ?= 1
 HEAP_SELF_TEST ?= 1
 USERMODE_SELF_TEST ?= 1
+LINUX_USER_SELF_TEST ?= 1
 LINUX_COMPAT_SELF_TEST ?= 1
 SCROLL_SELF_TEST ?= 0
 STORAGE_SELF_TEST ?= 0
@@ -27,6 +28,10 @@ ISO := $(BUILD_DIR)/nox.iso
 LIMINE_DIR := limine-binary
 FONT_C := $(GEN_DIR)/font_blob.c
 VERSION_C := $(GEN_DIR)/version_blob.c
+LINUX_HELLO_O := $(GEN_DIR)/linux/hello-linux.o
+LINUX_HELLO_ELF := $(GEN_DIR)/linux/hello-linux.elf
+LINUX_HELLO_C := $(GEN_DIR)/linux/hello-linux-blob.c
+LINUX_HELLO_BLOB_O := $(OBJ_DIR)/generated/linux/hello-linux-blob.o
 UPSTREAM_8139_C := $(GEN_DIR)/upstream/8139too.c
 UPSTREAM_8139_O := $(OBJ_DIR)/generated/upstream/8139too.o
 UPSTREAM_TEST_BUILD_DIR := build/upstream-8139
@@ -49,6 +54,9 @@ ASM_OBJECTS := $(patsubst %.S,$(OBJ_DIR)/%.S.o,$(ASM_SOURCES))
 OBJECTS := $(C_OBJECTS) $(ASM_OBJECTS)
 OBJECTS += $(OBJ_DIR)/generated/font_blob.o
 OBJECTS += $(OBJ_DIR)/generated/version_blob.o
+ifeq ($(LINUX_USER_SELF_TEST),1)
+OBJECTS += $(LINUX_HELLO_BLOB_O)
+endif
 ifeq ($(UPSTREAM_8139),1)
 OBJECTS += $(UPSTREAM_8139_O)
 endif
@@ -80,6 +88,7 @@ CFLAGS := \
 	-DTWILIGHT_VMM_SELF_TEST=$(VMM_SELF_TEST) \
 	-DTWILIGHT_HEAP_SELF_TEST=$(HEAP_SELF_TEST) \
 	-DTWILIGHT_USERMODE_SELF_TEST=$(USERMODE_SELF_TEST) \
+	-DTWILIGHT_LINUX_USER_SELF_TEST=$(LINUX_USER_SELF_TEST) \
 	-DTWILIGHT_LINUX_COMPAT_SELF_TEST=$(LINUX_COMPAT_SELF_TEST) \
 	-DTWILIGHT_SCROLL_SELF_TEST=$(SCROLL_SELF_TEST) \
 	-DTWILIGHT_STORAGE_SELF_TEST=$(STORAGE_SELF_TEST) \
@@ -120,6 +129,25 @@ FORCE_VERSION:
 $(VERSION_C): FORCE_VERSION scripts/gen-version.py twilight/build-number.txt
 	@mkdir -p $(GEN_DIR)
 	$(PYTHON) scripts/gen-version.py $@
+
+# Build a genuine freestanding x86-64 Linux ELF. The finished ELF is then
+# embedded only as transport for the early loader test; Twilight still parses
+# and maps it as an ELF executable at runtime.
+$(LINUX_HELLO_O): tests/linux/hello.S
+	@mkdir -p $(dir $@)
+	$(CC) -target x86_64-unknown-linux-gnu -c $< -o $@
+
+$(LINUX_HELLO_ELF): $(LINUX_HELLO_O) tests/linux/hello.ld
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_x86_64 -nostdlib -static -T tests/linux/hello.ld -o $@ $(LINUX_HELLO_O)
+	@echo "Built Linux userspace test ELF: $@"
+
+$(LINUX_HELLO_C): $(LINUX_HELLO_ELF) scripts/embed-linux-elf.py
+	$(PYTHON) scripts/embed-linux-elf.py $(LINUX_HELLO_ELF) $@
+
+$(LINUX_HELLO_BLOB_O): $(LINUX_HELLO_C)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(UPSTREAM_8139_C): scripts/fetch-linux-8139too.py
 	@mkdir -p $(dir $@)
