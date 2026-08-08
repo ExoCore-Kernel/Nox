@@ -2,6 +2,7 @@
 
 .extern gdt_tss
 .extern user_syscall_dispatch
+.extern linux_syscall_dispatch
 
 /*
  * Enter a separate user address space without ever running C on an arbitrary
@@ -26,6 +27,7 @@ user_mode_enter:
 
     movq %rsp, user_saved_kernel_rsp(%rip)
     movq %rcx, user_saved_kernel_cr3(%rip)
+    movq %rdx, user_saved_user_cr3(%rip)
 
     /* Keep the two user frame values in registers across the CR3 write. */
     movq %rdi, %r8
@@ -47,7 +49,8 @@ user_mode_enter:
     mov %ax, %es
 
     /* IRETQ frame for CPL3: SS, RSP, RFLAGS, CS, RIP. Keep IF clear during
-     * the self-test so no external device IRQ can interleave the transition. */
+     * the early userspace tests so external IRQs cannot interleave until the
+     * process/interrupt scheduler path is ready. */
     pushq $0x1b
     pushq %r9
     pushq $0x2
@@ -110,9 +113,97 @@ int80_stub:
     addq $120, %rsp
     addq $40, %rsp
 
-    /* Restore the kernel page tables BEFORE touching the original kernel
-     * stack. This is what makes the transition safe even if Limine placed its
-     * boot stack outside the mappings cloned into the user address space. */
+    jmp .Lrestore_original_kernel_context
+.size int80_stub, .-int80_stub
+
+/*
+ * Native x86-64 Linux SYSCALL entry.
+ *
+ * Unlike INT, SYSCALL does not consult the TSS and does not switch RSP. The
+ * first instructions therefore touch no stack at all: save the architectural
+ * return state in upper-half kernel storage, then move immediately to the
+ * transition stack shared by every user CR3.
+ *
+ * Linux x86-64 input ABI:
+ *   RAX = syscall number
+ *   RDI, RSI, RDX, R10, R8, R9 = arguments 1..6
+ *   RCX = user RIP (written by CPU)
+ *   R11 = user RFLAGS (written by CPU)
+ */
+.global linux_syscall_entry
+.type linux_syscall_entry, @function
+linux_syscall_entry:
+    cld
+
+    movq %rsp, linux_saved_user_rsp(%rip)
+    movq %rcx, linux_saved_user_rip(%rip)
+    movq %r11, linux_saved_user_rflags(%rip)
+    movq %rax, linux_saved_nr(%rip)
+    movq %rdi, linux_saved_arg1(%rip)
+    movq %rsi, linux_saved_arg2(%rip)
+    movq %rdx, linux_saved_arg3(%rip)
+    movq %r10, linux_saved_arg4(%rip)
+    movq %r8, linux_saved_arg5(%rip)
+    movq %r9, linux_saved_arg6(%rip)
+
+    leaq user_transition_stack_end(%rip), %rsp
+    andq $-16, %rsp
+
+    /* Kernel C executes on the shared upper-half transition stack while the
+     * process CR3 remains active. That keeps validated user pointers directly
+     * addressable without giving userspace access to kernel pages. */
+    mov $0x10, %ax
+    mov %ax, %ds
+    mov %ax, %es
+
+    /* SysV C wants args 1..6 in RDI,RSI,RDX,RCX,R8,R9 and arg7 on stack. */
+    subq $16, %rsp
+    movq linux_saved_arg6(%rip), %rax
+    movq %rax, 0(%rsp)
+    movq linux_saved_nr(%rip), %rdi
+    movq linux_saved_arg1(%rip), %rsi
+    movq linux_saved_arg2(%rip), %rdx
+    movq linux_saved_arg3(%rip), %rcx
+    movq linux_saved_arg4(%rip), %r8
+    movq linux_saved_arg5(%rip), %r9
+    call linux_syscall_dispatch
+    addq $16, %rsp
+
+    /* INT64_MIN is Twilight's private "process exited" sentinel. Linux errno
+     * values only occupy -1..-4095, so it cannot collide with a syscall result. */
+    movabsq $0x8000000000000000, %rdx
+    cmpq %rdx, %rax
+    je .Llinux_return_to_kernel
+
+    movq %rax, linux_saved_result(%rip)
+
+    /* Linux preserves the argument registers across the entry/exit machinery;
+     * RCX and R11 are the architecturally documented SYSCALL clobbers. */
+    movq linux_saved_arg1(%rip), %rdi
+    movq linux_saved_arg2(%rip), %rsi
+    movq linux_saved_arg3(%rip), %rdx
+    movq linux_saved_arg4(%rip), %r10
+    movq linux_saved_arg5(%rip), %r8
+    movq linux_saved_arg6(%rip), %r9
+
+    /* Restore user data selectors before SYSRETQ without destroying RAX. */
+    mov $0x1b, %ax
+    mov %ax, %ds
+    mov %ax, %es
+    movq linux_saved_result(%rip), %rax
+
+    movq linux_saved_user_rip(%rip), %rcx
+    movq linux_saved_user_rflags(%rip), %r11
+    movq linux_saved_user_rsp(%rip), %rsp
+    sysretq
+
+.Llinux_return_to_kernel:
+    /* exit/exit_group do not return to userspace. Restore the CR3 and original
+     * kernel call stack saved by user_mode_enter(). */
+    jmp .Lrestore_original_kernel_context
+.size linux_syscall_entry, .-linux_syscall_entry
+
+.Lrestore_original_kernel_context:
     movq user_saved_kernel_cr3(%rip), %rax
     movq %rax, %cr3
 
@@ -131,7 +222,6 @@ int80_stub:
     popq %rbp
     popq %rbx
     ret
-.size int80_stub, .-int80_stub
 
 .section .rodata
 .align 16
@@ -155,4 +245,29 @@ user_transition_stack_end:
 user_saved_kernel_rsp:
     .quad 0
 user_saved_kernel_cr3:
+    .quad 0
+user_saved_user_cr3:
+    .quad 0
+
+linux_saved_user_rsp:
+    .quad 0
+linux_saved_user_rip:
+    .quad 0
+linux_saved_user_rflags:
+    .quad 0
+linux_saved_nr:
+    .quad 0
+linux_saved_arg1:
+    .quad 0
+linux_saved_arg2:
+    .quad 0
+linux_saved_arg3:
+    .quad 0
+linux_saved_arg4:
+    .quad 0
+linux_saved_arg5:
+    .quad 0
+linux_saved_arg6:
+    .quad 0
+linux_saved_result:
     .quad 0
