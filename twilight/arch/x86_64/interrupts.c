@@ -6,6 +6,7 @@
 #include <twilight/interrupts.h>
 #include <twilight/io.h>
 #include <twilight/ioapic.h>
+#include <twilight/irq.h>
 
 struct idt_entry {
     uint16_t offset_low;
@@ -44,6 +45,7 @@ extern void irq14_stub(void);
 extern void irq15_stub(void);
 extern void int80_stub(void);
 extern void *exception_stub_table[32];
+extern void *msi_irq_stub_table[TWILIGHT_MSI_VECTOR_COUNT];
 
 static void idt_set_gate_dpl(uint8_t vector, void (*handler)(void), uint8_t dpl) {
     const uint64_t address = (uint64_t)handler;
@@ -76,6 +78,11 @@ void idt_init(void) {
     };
     for (size_t irq = 0; irq < 16; ++irq) {
         idt_set_gate((uint8_t)(0x20u + irq), legacy_irq_stubs[irq]);
+    }
+
+    for (size_t i = 0; i < TWILIGHT_MSI_VECTOR_COUNT; ++i) {
+        idt_set_gate((uint8_t)(TWILIGHT_MSI_VECTOR_BASE + i),
+                     (void (*)(void))msi_irq_stub_table[i]);
     }
 
     idt_set_gate_dpl(0x80, int80_stub, 3);
