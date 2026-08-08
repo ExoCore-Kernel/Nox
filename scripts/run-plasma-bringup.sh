@@ -30,6 +30,7 @@ make BUILD_DIR="$BUILD_DIR" \
 BASH_COMPAT_C="$BUILD_DIR/generated/linux/bash-shell-compat.c"
 BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 "$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/finalize-plasma-bash-compat.py "$BASH_COMPAT_C"
 rm -f "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
@@ -79,7 +80,7 @@ echo "Expected early proof:"
 echo "  [linux] Plasma rootfs mounted from Limine module: ..."
 echo "  [linux] Plasma rootfs probe PASS: /etc/nox-release is readable ..."
 echo "After Bash starts, test userspace rootfs I/O with:"
-echo "  source /etc/nox-release; echo \"rootfs=$NAME kernel=$KERNEL stage=$USERSPACE_STAGE\""
+echo '  source /etc/nox-release; echo "rootfs=$NAME kernel=$KERNEL stage=$USERSPACE_STAGE"'
 echo ""
 
 # Plasma itself will need substantially more than 512 MiB. Supplying a second
