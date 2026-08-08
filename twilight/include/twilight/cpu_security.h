@@ -7,6 +7,7 @@ struct cpu_security_status {
     bool smep;
     bool smap;
     bool umip;
+    bool fpu_sse;
 };
 
 bool cpu_security_init(void);
