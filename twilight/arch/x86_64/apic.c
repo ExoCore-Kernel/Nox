@@ -9,7 +9,9 @@
 #define IA32_APIC_BASE_MSR 0x1bu
 #define IA32_APIC_BASE_ENABLE (1ull << 11)
 #define IA32_APIC_BASE_X2APIC (1ull << 10)
-#define IA32_APIC_BASE_ADDRESS_MASK 0xfffff000ull
+/* Architectural APIC base occupies bits 12..35. */
+#define IA32_APIC_BASE_ADDRESS_MASK 0x0000000ffffff000ull
+#define IA32_APIC_DEFAULT_PHYSICAL  0x00000000fee00000ull
 
 #define LAPIC_ID        0x020u
 #define LAPIC_EOI       0x0b0u
@@ -30,6 +32,10 @@
 static volatile uint32_t *lapic_mmio;
 static bool virtual_wire_enabled;
 static bool native_enabled;
+/* Some emulators lose/zero the APIC base field when software disables the
+ * local APIC. Preserve the last valid architectural base so re-enabling xAPIC
+ * never depends on that emulator quirk. */
+static uint64_t lapic_physical_hint = IA32_APIC_DEFAULT_PHYSICAL;
 
 static void cpuid(uint32_t leaf, uint32_t *eax, uint32_t *ebx,
                   uint32_t *ecx, uint32_t *edx) {
@@ -86,10 +92,22 @@ static void lapic_write(uint32_t offset, uint32_t value) {
     (void)lapic_mmio[LAPIC_SVR / 4u];
 }
 
+static uint64_t usable_apic_physical(uint64_t base) {
+    uint64_t physical = base & IA32_APIC_BASE_ADDRESS_MASK;
+    if (physical != 0) {
+        lapic_physical_hint = physical;
+        return physical;
+    }
+    if (lapic_physical_hint != 0) return lapic_physical_hint;
+    return IA32_APIC_DEFAULT_PHYSICAL;
+}
+
 static bool map_and_enable_xapic(void) {
     if (!cpu_has_apic()) return false;
 
     uint64_t base = rdmsr(IA32_APIC_BASE_MSR);
+    const uint64_t physical = usable_apic_physical(base);
+
     if ((base & IA32_APIC_BASE_X2APIC) != 0) {
         /* Twilight's current interrupt core targets conventional MMIO xAPIC.
          * Leave x2APIC atomically before enabling xAPIC mode. */
@@ -98,19 +116,25 @@ static bool map_and_enable_xapic(void) {
         base = rdmsr(IA32_APIC_BASE_MSR);
     }
 
-    base &= ~IA32_APIC_BASE_X2APIC;
-    base |= IA32_APIC_BASE_ENABLE;
+    /* Restore the physical base explicitly. QEMU TCG on non-x86 hosts may
+     * report zero here after a previous disable even though CPUID still exposes
+     * a local APIC. */
+    base &= ~(IA32_APIC_BASE_X2APIC | IA32_APIC_BASE_ADDRESS_MASK);
+    base |= physical | IA32_APIC_BASE_ENABLE;
     wrmsr(IA32_APIC_BASE_MSR, base);
 
-    const uint64_t physical = base & IA32_APIC_BASE_ADDRESS_MASK;
-    if (physical == 0) return false;
+    const uint64_t verify = rdmsr(IA32_APIC_BASE_MSR);
+    if ((verify & IA32_APIC_BASE_ENABLE) == 0) return false;
+    const uint64_t verify_physical = usable_apic_physical(verify);
+    if (verify_physical == 0) return false;
 
-    /* Prefer the cache-disabled MMIO mapper once it is available. The HHDM
-     * fallback keeps very early/diagnostic use possible. */
+    /* Use the cache-disabled MMIO mapper when available. The HHDM fallback is
+     * retained for very early diagnostics, but normal boot reaches this after
+     * mmio_init(). */
     if (mmio_is_initialized())
-        lapic_mmio = (volatile uint32_t *)mmio_map(physical, 4096u);
+        lapic_mmio = (volatile uint32_t *)mmio_map(verify_physical, 4096u);
     if (lapic_mmio == 0)
-        lapic_mmio = (volatile uint32_t *)pmm_phys_to_virt(physical);
+        lapic_mmio = (volatile uint32_t *)pmm_phys_to_virt(verify_physical);
     if (lapic_mmio == 0) return false;
 
     uint32_t svr = lapic_read(LAPIC_SVR);
@@ -130,6 +154,7 @@ bool apic_disable_for_legacy_pic(void) {
     set_imcr_route(false);
 
     uint64_t base = rdmsr(IA32_APIC_BASE_MSR);
+    (void)usable_apic_physical(base);
     if ((base & IA32_APIC_BASE_X2APIC) != 0) {
         base &= ~(IA32_APIC_BASE_ENABLE | IA32_APIC_BASE_X2APIC);
         wrmsr(IA32_APIC_BASE_MSR, base);
