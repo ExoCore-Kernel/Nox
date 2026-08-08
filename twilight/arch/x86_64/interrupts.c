@@ -5,6 +5,7 @@
 #include <twilight/apic.h>
 #include <twilight/interrupts.h>
 #include <twilight/io.h>
+#include <twilight/ioapic.h>
 
 struct idt_entry {
     uint16_t offset_low;
@@ -77,8 +78,6 @@ void idt_init(void) {
         idt_set_gate((uint8_t)(0x20u + irq), legacy_irq_stubs[irq]);
     }
 
-    /* Compatibility syscall trap. DPL3 is intentional: userspace may invoke
-     * INT 0x80 while every hardware IRQ/exception gate remains kernel-only. */
     idt_set_gate_dpl(0x80, int80_stub, 3);
 
     const struct idtr descriptor = {
@@ -98,12 +97,17 @@ void pic_init(void) {
     outb(0x21, 0x01); io_wait();
     outb(0xa1, 0x01); io_wait();
 
-    outb(0x21, 0xfeu); /* IRQ0 only; IRQ1 and PCI lines start masked. */
+    outb(0x21, 0xfeu);
     outb(0xa1, 0xffu);
 }
 
 void pic_mask_irq(uint8_t irq) {
     if (irq >= 16u) return;
+    if (ioapic_is_active()) {
+        (void)ioapic_mask_legacy_irq(irq);
+        return;
+    }
+
     const uint16_t port = irq < 8u ? 0x21u : 0xa1u;
     const uint8_t bit = (uint8_t)(irq & 7u);
     const uint8_t mask = inb(port);
@@ -112,9 +116,12 @@ void pic_mask_irq(uint8_t irq) {
 
 void pic_unmask_irq(uint8_t irq) {
     if (irq >= 16u) return;
+    if (ioapic_is_active()) {
+        (void)ioapic_unmask_legacy_irq(irq);
+        return;
+    }
 
     if (irq >= 8u) {
-        /* Slave PIC interrupts reach the CPU through the master's IRQ2 cascade. */
         const uint8_t master_mask = inb(0x21u);
         outb(0x21u, (uint8_t)(master_mask & (uint8_t)~(1u << 2)));
     }
@@ -142,6 +149,11 @@ uint8_t pic_master_isr(void) {
 }
 
 void pic_send_eoi(uint8_t irq) {
+    if (ioapic_is_active()) {
+        apic_eoi_if_needed();
+        return;
+    }
+
     if (irq >= 8) outb(0xa0, 0x20);
     outb(0x20, 0x20);
     apic_eoi_if_needed();
