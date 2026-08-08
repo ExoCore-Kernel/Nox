@@ -12,6 +12,7 @@ HEAP_SELF_TEST ?= 1
 USERMODE_SELF_TEST ?= 1
 LINUX_USER_SELF_TEST ?= 1
 BUSYBOX_SELF_TEST ?= 0
+BASH_SHELL ?= 0
 LINUX_COMPAT_SELF_TEST ?= 1
 SCROLL_SELF_TEST ?= 0
 STORAGE_SELF_TEST ?= 0
@@ -38,6 +39,13 @@ BUSYBOX_C := $(GEN_DIR)/linux/busybox-blob.c
 BUSYBOX_BLOB_O := $(OBJ_DIR)/generated/linux/busybox-blob.o
 BUSYBOX_TEST_BUILD_DIR := build/busybox
 BUSYBOX_TEST_ISO := $(BUSYBOX_TEST_BUILD_DIR)/nox.iso
+BASH_BIN := $(GEN_DIR)/linux/bash-static-5.3-amd64
+BASH_C := $(GEN_DIR)/linux/bash-blob.c
+BASH_BLOB_O := $(OBJ_DIR)/generated/linux/bash-blob.o
+BASH_SHELL_C := $(GEN_DIR)/linux/bash-shell-compat.c
+BASH_SHELL_O := $(OBJ_DIR)/generated/linux/bash-shell-compat.o
+BASH_TEST_BUILD_DIR := build/bash
+BASH_TEST_ISO := $(BASH_TEST_BUILD_DIR)/nox.iso
 UPSTREAM_8139_C := $(GEN_DIR)/upstream/8139too.c
 UPSTREAM_8139_O := $(OBJ_DIR)/generated/upstream/8139too.o
 UPSTREAM_TEST_BUILD_DIR := build/upstream-8139
@@ -54,6 +62,11 @@ ifeq ($(UPSTREAM_8139),1)
 # of Twilight's compatibility port, so only one driver can claim 10ec:8139.
 C_SOURCES := $(filter-out twilight/drivers/linux/8139too.c,$(C_SOURCES))
 endif
+ifeq ($(BASH_SHELL),1)
+# Reuse the proven Linux ABI shell implementation through a generated Bash-
+# identity compatibility unit, so only one router implementation is linked.
+C_SOURCES := $(filter-out twilight/kernel/busybox_shell.c,$(C_SOURCES))
+endif
 ASM_SOURCES := $(shell find twilight -type f -name '*.S' -print)
 C_OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(C_SOURCES))
 ASM_OBJECTS := $(patsubst %.S,$(OBJ_DIR)/%.S.o,$(ASM_SOURCES))
@@ -64,7 +77,11 @@ ifeq ($(LINUX_USER_SELF_TEST),1)
 OBJECTS += $(LINUX_HELLO_BLOB_O)
 endif
 ifeq ($(BUSYBOX_SELF_TEST),1)
+ifeq ($(BASH_SHELL),1)
+OBJECTS += $(BASH_BLOB_O) $(BASH_SHELL_O)
+else
 OBJECTS += $(BUSYBOX_BLOB_O)
+endif
 endif
 ifeq ($(UPSTREAM_8139),1)
 OBJECTS += $(UPSTREAM_8139_O)
@@ -119,7 +136,7 @@ LDFLAGS := \
 	-z max-page-size=0x1000 \
 	-T twilight/linker.ld
 
-.PHONY: all twilight font iso run run-gui run-headless run-q35 run-busybox-test run-driver-test run-linux-driver-test run-ethernet-test run-upstream-ethernet-test run-upstream-ahci-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
+.PHONY: all twilight font iso run run-gui run-headless run-q35 run-busybox-test run-bash-test run-driver-test run-linux-driver-test run-ethernet-test run-upstream-ethernet-test run-upstream-ahci-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
 
 all: twilight
 
@@ -170,6 +187,28 @@ $(BUSYBOX_C): $(BUSYBOX_BIN) scripts/embed-linux-elf.py
 	$(PYTHON) scripts/embed-linux-elf.py $(BUSYBOX_BIN) $@ twilight_busybox_elf
 
 $(BUSYBOX_BLOB_O): $(BUSYBOX_C)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# GNU Bash is a separate Linux executable. Debian's bash-static package gives
+# us an x86_64 ET_EXEC with no dynamic interpreter, which fits the current
+# Twilight ELF loader while keeping the Bash executable bytes unchanged.
+$(BASH_BIN): scripts/fetch-bash-static.py
+	@mkdir -p $(dir $@)
+	$(PYTHON) scripts/fetch-bash-static.py $@
+
+$(BASH_C): $(BASH_BIN) scripts/embed-linux-elf.py
+	$(PYTHON) scripts/embed-linux-elf.py $(BASH_BIN) $@ twilight_busybox_elf
+
+$(BASH_BLOB_O): $(BASH_C)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BASH_SHELL_C): twilight/kernel/busybox_shell.c scripts/make-bash-shell-compat.py
+	@mkdir -p $(dir $@)
+	$(PYTHON) scripts/make-bash-shell-compat.py twilight/kernel/busybox_shell.c $@
+
+$(BASH_SHELL_O): $(BASH_SHELL_C)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -261,6 +300,13 @@ run-busybox-test:
 	@$(MAKE) BUILD_DIR=$(BUSYBOX_TEST_BUILD_DIR) LINUX_USER_SELF_TEST=0 BUSYBOX_SELF_TEST=1 iso
 	@echo "Running Twilight with official UNMODIFIED BusyBox 1.35.0 x86_64-musl"
 	@QEMU="$(QEMU)" sh scripts/run-qemu.sh auto pc $(BUSYBOX_TEST_ISO)
+
+# Boot a real statically linked GNU Bash Linux executable through the same
+# native x86_64 Linux ABI and serial/PS2 TTY that already runs BusyBox ash.
+run-bash-test:
+	@$(MAKE) BUILD_DIR=$(BASH_TEST_BUILD_DIR) LINUX_USER_SELF_TEST=0 BUSYBOX_SELF_TEST=1 BASH_SHELL=1 iso
+	@echo "Running Twilight with GNU Bash 5.3 static x86_64 Linux ELF as /bin/bash -i"
+	@QEMU="$(QEMU)" sh scripts/run-qemu.sh auto pc $(BASH_TEST_ISO)
 
 run-driver-test: iso
 	@echo "Running Twilight with QEMU pci-testdev for Linux-driver compatibility testing"
