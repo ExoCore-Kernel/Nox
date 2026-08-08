@@ -29,6 +29,10 @@ SECTIONS {
         . = ALIGN(8);
         __twilight_initcalls_start = .;
         KEEP(*(.twilight_initcalls))
+        /* BusyBox shell boots place every module_init into a named subsection;
+         * only the interactive shell is part of the executable initcall range.
+         * Other test initcalls remain linked but are not executed at boot. */
+        KEEP(*(.twilight_initcalls.busybox_shell_init))
         __twilight_initcalls_end = .;
         . = ALIGN(8);
         __twilight_exitcalls_start = .;
