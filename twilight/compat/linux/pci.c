@@ -59,8 +59,6 @@ static bool ensure_wrappers(void) {
 
         pdev->dev.init_name = linux_device_names[i];
         pdev->dev.driver_data = native->driver_data;
-        /* Conservative PCI default. A driver may widen this explicitly with
-         * dma_set_mask_and_coherent() after checking its hardware capability. */
         pdev->dev.dma_mask_storage = 0xffffffffull;
         pdev->dev.dma_mask = &pdev->dev.dma_mask_storage;
         pdev->dev.coherent_dma_mask = 0xffffffffull;
@@ -136,7 +134,6 @@ int pci_register_driver(struct pci_driver *driver) {
             native->bound_driver = driver;
             native->driver_data = pdev->dev.driver_data;
         } else {
-            /* Linux devres unwinds everything acquired by a failed probe. */
             devm_release_all(&pdev->dev);
             pdev->dev.driver_data = previous_driver_data;
             native->driver_data = previous_driver_data;
@@ -176,7 +173,7 @@ int linux_pci_register_builtin_drivers(void) {
 
     int first_error = 0;
     for (struct pci_driver **entry = __twilight_pci_drivers_start;
-         entry < __twilight_pci_drivers_end;
+         entry < __twilight_pci_drivers_end[];
          ++entry) {
         if (*entry == 0) continue;
         const int result = pci_register_driver(*entry);
@@ -203,6 +200,14 @@ void pci_set_master(struct pci_dev *pdev) {
 
 void pci_clear_master(struct pci_dev *pdev) {
     if (pdev != 0 && pdev->twilight != 0) pci_set_bus_master_native(pdev->twilight, false);
+}
+
+void pci_intx(struct pci_dev *pdev, int enable) {
+    if (pdev == 0 || pdev->twilight == 0) return;
+    u16 command = pci_config_read16(pdev->twilight, PCI_COMMAND);
+    if (enable) command &= (u16)~PCI_COMMAND_INTX_DISABLE;
+    else command |= PCI_COMMAND_INTX_DISABLE;
+    pci_config_write16(pdev->twilight, PCI_COMMAND, command);
 }
 
 resource_size_t pci_resource_start(struct pci_dev *pdev, int bar) {
@@ -242,6 +247,28 @@ void __iomem *pci_iomap(struct pci_dev *pdev, int bar, unsigned long maxlen) {
 void pci_iounmap(struct pci_dev *pdev, void __iomem *address) {
     (void)pdev;
     if (address != 0) iounmap(address);
+}
+
+int pcim_iomap_regions(struct pci_dev *pdev, int mask, const char *name) {
+    if (pdev == 0) return -ENODEV;
+    for (int bar = 0; bar < 6; ++bar) {
+        if ((mask & (1 << bar)) == 0) continue;
+        if ((pci_resource_flags(pdev, bar) & IORESOURCE_MEM) == 0) return -ENODEV;
+        if (pdev->iomap_table[bar] == 0) {
+            pdev->iomap_table[bar] = pcim_iomap(pdev, bar, 0);
+            if (pdev->iomap_table[bar] == 0) return -ENOMEM;
+        }
+    }
+    (void)name;
+    return 0;
+}
+
+void __iomem **pcim_iomap_table(struct pci_dev *pdev) {
+    return pdev != 0 ? pdev->iomap_table : 0;
+}
+
+void pcim_pin_device(struct pci_dev *pdev) {
+    (void)pdev;
 }
 
 int pci_request_regions(struct pci_dev *pdev, const char *name) {
