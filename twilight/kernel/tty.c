@@ -8,7 +8,9 @@
 #include <twilight/tty.h>
 
 #define COM1_BASE 0x3f8u
+#define COM1_MCR  (COM1_BASE + 4u)
 #define COM1_LSR  (COM1_BASE + 5u)
+#define COM1_MCR_LOOPBACK 0x10u
 #define COM1_LSR_DATA_READY 0x01u
 
 #define TTY_INPUT_CAPACITY 512u
@@ -41,6 +43,23 @@ static bool queue_pop(char *out) {
     *out = input_buffer[tail];
     input_tail = (tail + 1u) % TTY_INPUT_CAPACITY;
     return true;
+}
+
+static void prepare_serial_input(void) {
+    /* serial_init() may use the 16550 loopback bit while probing COM1. Never
+     * let an interactive userspace TTY inherit that state: otherwise bytes we
+     * print (including words from the shell banner) can come straight back as
+     * stdin. Preserve the other MCR bits and clear only LOOPBACK. */
+    const uint8_t mcr = inb(COM1_MCR);
+    if ((mcr & COM1_MCR_LOOPBACK) != 0)
+        outb(COM1_MCR, (uint8_t)(mcr & (uint8_t)~COM1_MCR_LOOPBACK));
+
+    /* Also discard anything the host terminal/UART queued during boot. Input
+     * only becomes meaningful after the foreground TTY is activated. */
+    for (unsigned int i = 0; i < 256u; ++i) {
+        if ((inb(COM1_LSR) & COM1_LSR_DATA_READY) == 0) break;
+        (void)inb(COM1_BASE);
+    }
 }
 
 static void framebuffer_console_byte(char c) {
@@ -104,7 +123,18 @@ void tty_reset(void) {
 }
 
 void tty_set_active(bool active) {
+    const bool was_enabled = interrupts_enabled();
+    __asm__ volatile ("cli" ::: "memory");
+
+    if (active) {
+        /* Start every foreground shell with a genuinely empty input stream. */
+        input_head = 0;
+        input_tail = 0;
+        prepare_serial_input();
+    }
     terminal_active = active;
+
+    if (was_enabled) __asm__ volatile ("sti" ::: "memory");
 }
 
 bool tty_is_active(void) {
