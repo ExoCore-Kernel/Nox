@@ -33,7 +33,10 @@ static bool run_builtin_initcalls(void) {
 }
 
 static void upgrade_interrupt_controller(void) {
-    if (ioapic_is_active()) return;
+    if (ioapic_is_active()) {
+        pr_info("ACPI MADT IOAPIC routing already active; Local APIC native mode ready for modern PCI interrupts");
+        return;
+    }
 
     const bool was_enabled = interrupts_are_enabled();
     interrupts_disable();
