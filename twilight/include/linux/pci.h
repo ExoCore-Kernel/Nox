@@ -49,6 +49,20 @@
 #define PCI_CAP_ID_EXP       0x10
 #define PCI_CAP_ID_MSIX      0x11
 
+/* Message Signalled Interrupt capability layout. */
+#define PCI_MSI_FLAGS            0x02
+#define PCI_MSI_FLAGS_ENABLE     0x0001
+#define PCI_MSI_FLAGS_QMASK      0x000e
+#define PCI_MSI_FLAGS_QSIZE      0x0070
+#define PCI_MSI_FLAGS_64BIT      0x0080
+#define PCI_MSI_FLAGS_MASKBIT    0x0100
+#define PCI_MSI_ADDRESS_LO       0x04
+#define PCI_MSI_ADDRESS_HI       0x08
+#define PCI_MSI_DATA_32          0x08
+#define PCI_MSI_DATA_64          0x0c
+#define PCI_MSI_MASK_32          0x0c
+#define PCI_MSI_MASK_64          0x10
+
 #define IORESOURCE_IO        0x00000100ull
 #define IORESOURCE_MEM       0x00000200ull
 #define IORESOURCE_PREFETCH  0x00002000ull
@@ -81,6 +95,10 @@ struct pci_dev {
     u32 class;
     u8 revision;
     unsigned int irq;
+    unsigned int legacy_irq;
+    u8 msi_cap;
+    u8 msi_vector;
+    bool msi_enabled;
     struct twilight_pci_device *twilight;
     void __iomem *iomap_table[6];
 };
@@ -183,11 +201,8 @@ static inline void *pci_get_drvdata(struct pci_dev *pdev) {
     return pdev != 0 ? dev_get_drvdata(&pdev->dev) : 0;
 }
 
-static inline int pci_enable_msi(struct pci_dev *pdev) {
-    (void)pdev;
-    return -ENOSYS;
-}
-static inline void pci_disable_msi(struct pci_dev *pdev) { (void)pdev; }
+int pci_enable_msi(struct pci_dev *pdev);
+void pci_disable_msi(struct pci_dev *pdev);
 
 static inline int pci_set_dma_mask(struct pci_dev *pdev, u64 mask) {
     return pdev != 0 ? dma_set_mask(&pdev->dev, mask) : -EINVAL;
