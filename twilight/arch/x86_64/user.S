@@ -3,7 +3,7 @@
 .extern gdt_tss
 .extern user_syscall_dispatch
 #if TWILIGHT_BUSYBOX_SELF_TEST
-.extern linux_busybox_syscall_dispatch
+.extern linux_busybox_syscall_router
 #else
 .extern linux_syscall_dispatch
 #endif
@@ -208,7 +208,7 @@ linux_syscall_entry:
     movq linux_saved_arg4(%rip), %r8
     movq linux_saved_arg5(%rip), %r9
 #if TWILIGHT_BUSYBOX_SELF_TEST
-    call linux_busybox_syscall_dispatch
+    call linux_busybox_syscall_router
 #else
     call linux_syscall_dispatch
 #endif
