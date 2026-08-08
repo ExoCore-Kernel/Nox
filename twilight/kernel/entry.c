@@ -49,6 +49,10 @@
 #define TWILIGHT_USERMODE_SELF_TEST 1
 #endif
 
+#ifndef TWILIGHT_LINUX_USER_SELF_TEST
+#define TWILIGHT_LINUX_USER_SELF_TEST 1
+#endif
+
 #ifndef TWILIGHT_LINUX_COMPAT_SELF_TEST
 #define TWILIGHT_LINUX_COMPAT_SELF_TEST 1
 #endif
@@ -443,6 +447,13 @@ void kmain(void) {
     if (!user_mode_self_test()) kernel_panic("Ring 3 privilege transition self-test failed");
     trace("ring 3 self-test passed");
     klog("Ring 3 transition passed: CPL3 -> int80 -> CPL0 -> CPL3 -> kernel");
+#endif
+
+#if TWILIGHT_LINUX_USER_SELF_TEST
+    trace("entering Linux x86_64 ELF/SYSCALL self-test");
+    if (!linux_user_self_test()) kernel_panic("Linux x86_64 ELF/SYSCALL userspace self-test failed");
+    trace("Linux x86_64 ELF/SYSCALL self-test passed");
+    klog("Linux userspace ABI baseline passed: ELF64 loader + native SYSCALL write/exit_group");
 #endif
 
     if (apic_disable_for_legacy_pic()) {
