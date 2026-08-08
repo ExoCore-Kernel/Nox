@@ -5,6 +5,7 @@ QEMU_BIN="${QEMU:-qemu-system-x86_64}"
 BUILD_DIR="${BUILD_DIR:-build/upstream-all-matrix}"
 ISO="$BUILD_DIR/nox.iso"
 LOG_DIR="${LOG_DIR:-build/upstream-all-matrix-logs}"
+AHCI_DISK="$LOG_DIR/ahci-test.img"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-60}"
 POLL_INTERVAL="${POLL_INTERVAL:-1}"
 
@@ -27,6 +28,13 @@ make BUILD_DIR="$BUILD_DIR" \
     STORAGE_SELF_TEST=0 \
     iso
 
+# Use the same deterministic SATA medium as the strict AHCI proof. The matrix
+# boots the Limine ISO from the i440FX IDE controller and gives upstream ahci.c
+# a separate ICH9 AHCI controller + raw SATA disk. That prevents the boot CD
+# from being mistaken for an ATA disk by Twilight's intentionally small libata
+# compatibility layer and keeps driver-probe time near the normal ~1-2 seconds.
+python3 scripts/make-ahci-test-disk.py "$AHCI_DISK"
+
 DEVICE_HELP="$($QEMU_BIN -device help 2>/dev/null || true)"
 
 device_available() {
@@ -35,6 +43,11 @@ device_available() {
         *) return 1 ;;
     esac
 }
+
+if ! device_available ich9-ahci; then
+    echo "error: QEMU ich9-ahci device is required for the upstream matrix" >&2
+    exit 1
+fi
 
 stop_qemu() {
     pid="$1"
@@ -54,6 +67,9 @@ binding_present() {
     log="$1"
     pci_id="$2"
     driver="$3"
+    # Bash builds now emit an initial PCI inventory before exact upstream
+    # module_init calls and a final inventory afterwards. Match any final bound
+    # line; the earlier driver=NONE line is intentionally harmless.
     tr -d '\r' <"$log" | grep -Eq "PCI BIND .*id=${pci_id} .*driver=${driver}($| )"
 }
 
@@ -67,18 +83,21 @@ run_case() {
 
     echo ""
     echo "===== $name ====="
-    echo "QEMU args: $*"
+    echo "QEMU extra args: $*"
 
     : >"$log"
     : >"$qemu_log"
 
     "$QEMU_BIN" \
-        -M q35 \
+        -M pc \
         -cpu qemu64 \
         -m 512M \
         -cdrom "$ISO" \
         -boot d \
         -nic none \
+        -device ich9-ahci,id=ahci \
+        -drive if=none,id=ahcidisk,format=raw,file="$AHCI_DISK" \
+        -device ide-hd,drive=ahcidisk,bus=ahci.0 \
         -serial "file:$log" \
         -monitor none \
         -display none \
@@ -147,7 +166,7 @@ run_case() {
     done
     IFS="$old_ifs"
 
-    grep -E 'Linux module initcall|PCI shell preflight|PCI BIND|Ethernet|AHCI|ata|pvpanic|bash-shell|nox#|\[panic\]|\[linux:error\]' "$log" | tail -n 140 || true
+    grep -E 'Linux module initcall|PCI shell preflight|PCI shell post-driver|PCI BIND|Ethernet|AHCI|ata|pvpanic|bash-shell|nox#|\[panic\]|\[linux:error\]' "$log" | tail -n 180 || true
 
     if [ "$outcome" != "pass" ] || [ "$driver_failures" -ne 0 ]; then
         if [ -s "$qemu_log" ]; then
@@ -162,9 +181,9 @@ run_case() {
 
 failures=0
 
-# q35 contains an ICH9 AHCI function (8086:2922) even with -nic none, so this
-# isolated case proves the exact upstream ahci.c can bind without another PCI
-# function being added.
+# Every case includes the dedicated ICH9 AHCI function + deterministic SATA
+# disk above, so ahci is tested continuously while other upstream devices are
+# added around it.
 run_case ahci "8086:2922=ahci" || failures=$((failures + 1))
 
 if device_available rtl8139; then
