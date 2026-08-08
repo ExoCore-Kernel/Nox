@@ -9,6 +9,7 @@
 #include <twilight/keyboard.h>
 #include <twilight/linux_compat.h>
 #include <twilight/log.h>
+#include <twilight/tty.h>
 
 #define PS2_DATA_PORT 0x60u
 #define PS2_STATUS_PORT 0x64u
@@ -25,6 +26,8 @@
 
 static bool left_shift;
 static bool right_shift;
+static bool left_ctrl;
+static bool right_ctrl;
 static bool caps_lock;
 static bool extended_prefix;
 static bool console_attached;
@@ -91,21 +94,30 @@ static void console_backspace(void) {
     framebuffer_fill_rect(cursor_x, cursor_y, w, h, BG_R, BG_G, BG_B);
 }
 
-static void console_putc(char c) {
+void keyboard_console_putc(char c) {
     attach_console_if_needed();
 
     const size_t w = font_width();
     const size_t h = font_height();
     if (w == 0 || h == 0) return;
 
+    if (c == '\r') {
+        cursor_x = line_start_x;
+        return;
+    }
     if (c == '\n') {
         console_newline();
         return;
     }
-    if (c == '\b') {
+    if (c == '\b' || c == 0x7f) {
         console_backspace();
         return;
     }
+    if (c == '\t') {
+        for (unsigned int i = 0; i < 4u; ++i) keyboard_console_putc(' ');
+        return;
+    }
+    if ((unsigned char)c < 0x20u) return;
 
     if (cursor_x + w >= framebuffer_width()) console_newline();
     font_draw_char(c, cursor_x, cursor_y, FG_R, FG_G, FG_B);
@@ -125,15 +137,37 @@ static char translate_scancode(uint8_t code) {
     return c;
 }
 
+static void emit_key(char c) {
+    if (tty_is_active()) tty_input_char(c);
+    else keyboard_console_putc(c);
+}
+
+static void emit_extended_key(uint8_t code) {
+    if (!tty_is_active()) return;
+    switch (code) {
+    case 0x48: tty_input_sequence("\x1b[A", 3); break; /* Up */
+    case 0x50: tty_input_sequence("\x1b[B", 3); break; /* Down */
+    case 0x4d: tty_input_sequence("\x1b[C", 3); break; /* Right */
+    case 0x4b: tty_input_sequence("\x1b[D", 3); break; /* Left */
+    case 0x47: tty_input_sequence("\x1b[H", 3); break; /* Home */
+    case 0x4f: tty_input_sequence("\x1b[F", 3); break; /* End */
+    case 0x53: tty_input_sequence("\x1b[3~", 4); break; /* Delete */
+    default: break;
+    }
+}
+
 bool ps2_keyboard_init(void) {
     left_shift = false;
     right_shift = false;
+    left_ctrl = false;
+    right_ctrl = false;
     caps_lock = false;
     extended_prefix = false;
     console_attached = false;
     line_start_x = 48u;
     cursor_x = line_start_x;
     cursor_y = 0u;
+    tty_reset();
 
     flush_output();
 
@@ -171,23 +205,32 @@ void keyboard_irq_handler(void) {
         return;
     }
 
+    const bool released = (scancode & 0x80u) != 0;
+    const uint8_t code = (uint8_t)(scancode & 0x7fu);
+
     if (extended_prefix) {
         extended_prefix = false;
+        if (code == 0x1du) right_ctrl = !released;
+        else if (!released) emit_extended_key(code);
         pic_send_eoi(1);
         return;
     }
 
-    const bool released = (scancode & 0x80u) != 0;
-    const uint8_t code = (uint8_t)(scancode & 0x7fu);
-
     if (code == 0x2au) left_shift = !released;
     else if (code == 0x36u) right_shift = !released;
+    else if (code == 0x1du) left_ctrl = !released;
     else if (!released && code == 0x3au) caps_lock = !caps_lock;
-    else if (!released && code == 0x1cu) console_putc('\n');
-    else if (!released && code == 0x0eu) console_putc('\b');
+    else if (!released && code == 0x1cu) emit_key('\n');
+    else if (!released && code == 0x0eu) emit_key(tty_is_active() ? 0x7f : '\b');
+    else if (!released && code == 0x0fu) emit_key('\t');
+    else if (!released && code == 0x01u) emit_key(0x1b);
     else if (!released) {
-        const char c = translate_scancode(code);
-        if (c != 0) console_putc(c);
+        char c = translate_scancode(code);
+        if (c != 0) {
+            if ((left_ctrl || right_ctrl) && c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 1);
+            else if ((left_ctrl || right_ctrl) && c >= 'a' && c <= 'z') c = (char)(c - 'a' + 1);
+            emit_key(c);
+        }
     }
 
     pic_send_eoi(1);
