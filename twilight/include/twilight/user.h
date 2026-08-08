@@ -3,6 +3,47 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* An interactive BusyBox boot is a normal OS boot, not the bring-up test
+ * harness. Keep the diagnostic tests available for explicit test targets, but
+ * suppress them when TWILIGHT_BUSYBOX_SELF_TEST selects the shell image. The
+ * initialization itself still runs and remains fail-closed on real errors. */
+#if defined(TWILIGHT_BUSYBOX_SELF_TEST) && TWILIGHT_BUSYBOX_SELF_TEST
+#ifdef TWILIGHT_PMM_SELF_TEST
+#undef TWILIGHT_PMM_SELF_TEST
+#endif
+#define TWILIGHT_PMM_SELF_TEST 0
+
+#ifdef TWILIGHT_VMM_SELF_TEST
+#undef TWILIGHT_VMM_SELF_TEST
+#endif
+#define TWILIGHT_VMM_SELF_TEST 0
+
+#ifdef TWILIGHT_HEAP_SELF_TEST
+#undef TWILIGHT_HEAP_SELF_TEST
+#endif
+#define TWILIGHT_HEAP_SELF_TEST 0
+
+#ifdef TWILIGHT_USERMODE_SELF_TEST
+#undef TWILIGHT_USERMODE_SELF_TEST
+#endif
+#define TWILIGHT_USERMODE_SELF_TEST 0
+
+#ifdef TWILIGHT_LINUX_USER_SELF_TEST
+#undef TWILIGHT_LINUX_USER_SELF_TEST
+#endif
+#define TWILIGHT_LINUX_USER_SELF_TEST 0
+
+#ifdef TWILIGHT_LINUX_COMPAT_SELF_TEST
+#undef TWILIGHT_LINUX_COMPAT_SELF_TEST
+#endif
+#define TWILIGHT_LINUX_COMPAT_SELF_TEST 0
+
+#ifdef TWILIGHT_SCROLL_SELF_TEST
+#undef TWILIGHT_SCROLL_SELF_TEST
+#endif
+#define TWILIGHT_SCROLL_SELF_TEST 0
+#endif
+
 bool user_mode_is_available(void);
 bool user_mode_self_test(void);
 bool linux_user_self_test(void);
