@@ -13,6 +13,7 @@ USERMODE_SELF_TEST ?= 1
 LINUX_COMPAT_SELF_TEST ?= 1
 SCROLL_SELF_TEST ?= 0
 UPSTREAM_8139 ?= 0
+UPSTREAM_AHCI ?= 0
 TPM_STATE_DIR ?= .nox-tpm-state
 TPM_MODE ?= auto
 
@@ -29,6 +30,11 @@ UPSTREAM_8139_C := $(GEN_DIR)/upstream/8139too.c
 UPSTREAM_8139_O := $(OBJ_DIR)/generated/upstream/8139too.o
 UPSTREAM_TEST_BUILD_DIR := build/upstream-8139
 UPSTREAM_TEST_ISO := $(UPSTREAM_TEST_BUILD_DIR)/nox.iso
+UPSTREAM_AHCI_C := $(GEN_DIR)/upstream/ahci.c
+UPSTREAM_AHCI_O := $(OBJ_DIR)/generated/upstream/ahci.o
+UPSTREAM_AHCI_TEST_BUILD_DIR := build/upstream-ahci
+UPSTREAM_AHCI_TEST_ISO := $(UPSTREAM_AHCI_TEST_BUILD_DIR)/nox.iso
+UPSTREAM_AHCI_TEST_DISK := $(UPSTREAM_AHCI_TEST_BUILD_DIR)/ahci-test.img
 
 C_SOURCES := $(shell find twilight -type f -name '*.c' ! -path 'twilight/src/*' -print)
 ifeq ($(UPSTREAM_8139),1)
@@ -44,6 +50,9 @@ OBJECTS += $(OBJ_DIR)/generated/font_blob.o
 OBJECTS += $(OBJ_DIR)/generated/version_blob.o
 ifeq ($(UPSTREAM_8139),1)
 OBJECTS += $(UPSTREAM_8139_O)
+endif
+ifeq ($(UPSTREAM_AHCI),1)
+OBJECTS += $(UPSTREAM_AHCI_O)
 endif
 
 CFLAGS := \
@@ -88,7 +97,7 @@ LDFLAGS := \
 	-z max-page-size=0x1000 \
 	-T twilight/linker.ld
 
-.PHONY: all twilight font iso run run-gui run-headless run-q35 run-driver-test run-linux-driver-test run-ethernet-test run-upstream-ethernet-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
+.PHONY: all twilight font iso run run-gui run-headless run-q35 run-driver-test run-linux-driver-test run-ethernet-test run-upstream-ethernet-test run-upstream-ahci-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
 
 all: twilight
 
@@ -118,6 +127,15 @@ $(UPSTREAM_8139_O): $(UPSTREAM_8139_C)
 	@mkdir -p $(dir $@)
 	@echo "Compiling exact upstream Linux v2.6.24 8139too.c (source remains unmodified)"
 	$(CC) $(CFLAGS) -DKBUILD_MODNAME=\"8139too\" -c $< -o $@
+
+$(UPSTREAM_AHCI_C): scripts/fetch-linux-ahci.py
+	@mkdir -p $(dir $@)
+	$(PYTHON) scripts/fetch-linux-ahci.py $@
+
+$(UPSTREAM_AHCI_O): $(UPSTREAM_AHCI_C)
+	@mkdir -p $(dir $@)
+	@echo "Compiling exact upstream Linux v2.6.24 ahci.c (source remains unmodified)"
+	$(CC) $(CFLAGS) -DKBUILD_MODNAME=\"ahci\" -c $< -o $@
 
 $(KERNEL): $(OBJECTS) twilight/linker.ld | $(BUILD_DIR)
 	$(LD) $(LDFLAGS) $(OBJECTS) -o $@
@@ -200,6 +218,14 @@ run-upstream-ethernet-test:
 	@$(MAKE) BUILD_DIR=$(UPSTREAM_TEST_BUILD_DIR) UPSTREAM_8139=1 iso
 	@echo "Running Twilight with UNMODIFIED upstream Linux v2.6.24 8139too.c"
 	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-netdev user,id=noxnet -device rtl8139,netdev=noxnet,mac=52:54:00:12:34:56" sh scripts/run-qemu.sh auto pc $(UPSTREAM_TEST_ISO)
+
+# Strict AHCI compatibility test. The Linux source is hash-pinned and compiled
+# unchanged; Twilight supplies the libata compatibility boundary around it.
+run-upstream-ahci-test:
+	@$(MAKE) BUILD_DIR=$(UPSTREAM_AHCI_TEST_BUILD_DIR) UPSTREAM_AHCI=1 iso
+	@$(PYTHON) scripts/make-ahci-test-disk.py $(UPSTREAM_AHCI_TEST_DISK)
+	@echo "Running Twilight with UNMODIFIED upstream Linux v2.6.24 ahci.c + QEMU ICH9 AHCI"
+	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-device ich9-ahci,id=ahci -drive if=none,id=ahcidisk,format=raw,file=$(UPSTREAM_AHCI_TEST_DISK) -device ide-hd,drive=ahcidisk,bus=ahci.0" sh scripts/run-qemu.sh auto pc $(UPSTREAM_AHCI_TEST_ISO)
 
 run-tpm: iso
 	@echo "Running Twilight with persistent emulated TPM 2.0 (CRB frontend)"
