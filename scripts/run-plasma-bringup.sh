@@ -24,6 +24,19 @@ make BUILD_DIR="$BUILD_DIR" \
     BASH_SHELL=1 \
     twilight limine
 
+# Plasma bring-up extends only the generated Bash ABI unit for now: real
+# read-only rootfs open/read/stat/lseek/close calls. Normal Bash/driver builds
+# remain untouched. Rebuild just that object and relink the kernel afterward.
+BASH_COMPAT_C="$BUILD_DIR/generated/linux/bash-shell-compat.c"
+BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
+"$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
+rm -f "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
+make BUILD_DIR="$BUILD_DIR" \
+    LINUX_USER_SELF_TEST=0 \
+    BUSYBOX_SELF_TEST=1 \
+    BASH_SHELL=1 \
+    twilight
+
 case "$ROOTFS_KIND" in
     tiny)
         echo "Plasma rootfs mode: tiny CPIO protocol sanity test"
@@ -65,6 +78,8 @@ echo "Rootfs mode: $ROOTFS_KIND"
 echo "Expected early proof:"
 echo "  [linux] Plasma rootfs mounted from Limine module: ..."
 echo "  [linux] Plasma rootfs probe PASS: /etc/nox-release is readable ..."
+echo "After Bash starts, test userspace rootfs I/O with:"
+echo "  source /etc/nox-release; echo \"rootfs=$NAME kernel=$KERNEL stage=$USERSPACE_STAGE\""
 echo ""
 
 # Plasma itself will need substantially more than 512 MiB. Supplying a second
