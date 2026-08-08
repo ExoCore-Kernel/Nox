@@ -40,6 +40,7 @@ bool linux_driver_runtime_init(void) {
         return false;
     }
 
+#if !defined(TWILIGHT_BUSYBOX_SELF_TEST) || !TWILIGHT_BUSYBOX_SELF_TEST
     if (!linux_driver_runtime_self_test()) {
         pr_err("driver runtime self-test failed");
         runtime_initializing = false;
@@ -47,7 +48,11 @@ bool linux_driver_runtime_init(void) {
     }
 
     pr_info("driver runtime self-test: IRQ, coherent/streaming DMA, workqueues and timers ready");
+#endif
 
+    /* In a BusyBox shell boot the linker exposes only busybox_shell_init here,
+     * so boot falls directly into the interactive Linux userspace process.
+     * Explicit driver-test builds keep the complete initcall/self-test path. */
     if (!run_builtin_initcalls()) {
         runtime_initializing = false;
         return false;
@@ -70,6 +75,7 @@ bool linux_driver_runtime_init(void) {
     runtime_initializing = false;
     pr_info("built-in Linux PCI drivers registered after interrupt bring-up");
 
+#if !defined(TWILIGHT_BUSYBOX_SELF_TEST) || !TWILIGHT_BUSYBOX_SELF_TEST
     if (linux_net_device_count() != 0) {
         pr_info("Linux network core: %zu Ethernet device(s) registered; starting end-to-end ARP test",
                 linux_net_device_count());
@@ -77,6 +83,7 @@ bool linux_driver_runtime_init(void) {
             pr_warn("Linux Ethernet ARP self-test did not complete; driver runtime remains active for diagnostics");
         }
     }
+#endif
 
     return true;
 }
