@@ -8,6 +8,8 @@
 #include <linux/types.h>
 
 #define DMA_BIT_MASK(n) ((n) == 64 ? ~0ull : ((1ull << (n)) - 1ull))
+#define DMA_32BIT_MASK DMA_BIT_MASK(32)
+#define DMA_64BIT_MASK DMA_BIT_MASK(64)
 #define DMA_MAPPING_ERROR (~(dma_addr_t)0)
 
 enum dma_data_direction {
@@ -49,6 +51,16 @@ int dma_set_mask(struct device *dev, u64 mask);
 int dma_set_coherent_mask(struct device *dev, u64 mask);
 int dma_set_mask_and_coherent(struct device *dev, u64 mask);
 u64 dma_get_mask(struct device *dev);
+
+/* Managed DMA lifetime will be tied into devres when hot-unplug/remove is
+ * implemented. For built-in boot-time drivers the allocation has device
+ * lifetime, matching the effective lifetime needed by AHCI. */
+static inline void *dmam_alloc_coherent(struct device *dev,
+                                        size_t size,
+                                        dma_addr_t *dma_handle,
+                                        gfp_t flags) {
+    return dma_alloc_coherent(dev, size, dma_handle, flags);
+}
 
 static inline void *dma_alloc_wc(struct device *dev,
                                  size_t size,
