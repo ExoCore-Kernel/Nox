@@ -18,6 +18,16 @@ static volatile unsigned int input_tail;
 static char input_buffer[TTY_INPUT_CAPACITY];
 static volatile bool terminal_active;
 
+enum framebuffer_ansi_state {
+    FB_ANSI_NORMAL = 0,
+    FB_ANSI_ESC,
+    FB_ANSI_CSI,
+};
+
+static enum framebuffer_ansi_state fb_ansi_state;
+static unsigned int fb_csi_value;
+static bool fb_csi_has_value;
+
 static bool interrupts_enabled(void) {
     uint64_t flags;
     __asm__ volatile ("pushfq; popq %0" : "=r"(flags));
@@ -33,12 +43,63 @@ static bool queue_pop(char *out) {
     return true;
 }
 
+static void framebuffer_console_byte(char c) {
+    const unsigned char uc = (unsigned char)c;
+
+    if (fb_ansi_state == FB_ANSI_NORMAL) {
+        if (uc == 0x1bu) {
+            fb_ansi_state = FB_ANSI_ESC;
+            return;
+        }
+        keyboard_console_putc(c);
+        return;
+    }
+
+    if (fb_ansi_state == FB_ANSI_ESC) {
+        if (c == '[') {
+            fb_ansi_state = FB_ANSI_CSI;
+            fb_csi_value = 0;
+            fb_csi_has_value = false;
+            return;
+        }
+        /* Ignore single-character escape sequences on the simple framebuffer
+         * mirror; COM1 receives the original bytes unchanged. */
+        fb_ansi_state = FB_ANSI_NORMAL;
+        return;
+    }
+
+    /* CSI parameter bytes. We only need enough cursor behavior to keep the
+     * BusyBox line editor readable on the framebuffer. */
+    if (c >= '0' && c <= '9') {
+        fb_csi_has_value = true;
+        if (fb_csi_value < 1000u)
+            fb_csi_value = fb_csi_value * 10u + (unsigned int)(c - '0');
+        return;
+    }
+    if (c == ';' || c == '?' || c == '>') return;
+
+    const unsigned int count = fb_csi_has_value && fb_csi_value != 0 ? fb_csi_value : 1u;
+    if (c == 'D') {
+        for (unsigned int i = 0; i < count; ++i) keyboard_console_putc('\b');
+    } else if (c == 'C') {
+        for (unsigned int i = 0; i < count; ++i) keyboard_console_putc(' ');
+    } else if (c == 'G' || c == 'H') {
+        keyboard_console_putc('\r');
+    }
+    /* K/J/m/h/l and other terminal controls are intentionally ignored by the
+     * framebuffer mirror. The serial terminal handles their full semantics. */
+    fb_ansi_state = FB_ANSI_NORMAL;
+}
+
 void tty_reset(void) {
     const bool was_enabled = interrupts_enabled();
     __asm__ volatile ("cli" ::: "memory");
     input_head = 0;
     input_tail = 0;
     terminal_active = false;
+    fb_ansi_state = FB_ANSI_NORMAL;
+    fb_csi_value = 0;
+    fb_csi_has_value = false;
     if (was_enabled) __asm__ volatile ("sti" ::: "memory");
 }
 
@@ -82,15 +143,22 @@ void tty_poll_serial_input(void) {
     }
 }
 
-int tty_read_char_blocking(char *out) {
-    if (out == 0 || !terminal_active) return -1;
+bool tty_input_available(void) {
+    if (!terminal_active) return false;
+    const bool was_enabled = interrupts_enabled();
+    __asm__ volatile ("cli" ::: "memory");
+    tty_poll_serial_input();
+    const bool ready = input_head != input_tail;
+    if (was_enabled) __asm__ volatile ("sti" ::: "memory");
+    return ready;
+}
 
+void tty_wait_for_input(void) {
+    if (!terminal_active) return;
     for (;;) {
-        /* SYSCALL enters with IF masked. Keep queue operations atomic against
-         * PS/2 IRQ1, and poll the UART while IF is still clear. */
         __asm__ volatile ("cli" ::: "memory");
         tty_poll_serial_input();
-        if (queue_pop(out)) return 1;
+        if (input_head != input_tail) return;
 
         /* Let PIT/PS2 interrupts run while sleeping. PIT guarantees that a
          * serial-only session wakes periodically to poll COM1 as well. */
@@ -98,9 +166,16 @@ int tty_read_char_blocking(char *out) {
     }
 }
 
+int tty_read_char_blocking(char *out) {
+    if (out == 0 || !terminal_active) return -1;
+    tty_wait_for_input();
+    __asm__ volatile ("cli" ::: "memory");
+    return queue_pop(out) ? 1 : -1;
+}
+
 void tty_write_char(char c) {
     serial_write_char(c);
-    keyboard_console_putc(c);
+    framebuffer_console_byte(c);
 }
 
 void tty_write(const char *bytes, size_t length) {
