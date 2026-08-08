@@ -14,7 +14,7 @@ struct dmi_system_id {
     void *driver_data;
 };
 
-#define DMI_MATCH(slot, text) { .slot = (slot), .substr = (text) }
+#define DMI_MATCH(slot_id, text_value) { .slot = (slot_id), .substr = (text_value) }
 
 /* Twilight does not yet expose SMBIOS/DMI strings to Linux compatibility.
  * Returning no match is conservative and only disables board-specific quirks. */
