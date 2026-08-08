@@ -3,6 +3,8 @@
 #include <linux/netdevice.h>
 #include <linux/pci.h>
 #include <linux/printk.h>
+#include <twilight/interrupts.h>
+#include <twilight/ioapic.h>
 #include <twilight/irq.h>
 #include <twilight/linux_compat.h>
 #include <twilight/linux_storage.h>
@@ -30,10 +32,34 @@ static bool run_builtin_initcalls(void) {
     return true;
 }
 
+static void upgrade_interrupt_controller(void) {
+    if (ioapic_is_active()) return;
+
+    const bool was_enabled = interrupts_are_enabled();
+    interrupts_disable();
+
+    if (ioapic_init()) {
+        /* PIT was already proven through the conservative PIC/virtual-wire
+         * bring-up. Keep its IRQ live immediately after switching controllers;
+         * PS/2 and PCI lines are unmasked later by their normal owners. */
+        pic_unmask_irq(0);
+        pr_info("ACPI MADT IOAPIC routing active; Local APIC native mode ready for modern PCI interrupts");
+    } else {
+        pr_info("IOAPIC/native Local APIC unavailable; retaining legacy PIC interrupt routing");
+    }
+
+    if (was_enabled) interrupts_enable();
+}
+
 bool linux_driver_runtime_init(void) {
     if (runtime_initialized) return true;
     if (runtime_initializing) return false;
     runtime_initializing = true;
+
+    /* Upgrade only after the PIT has proven that the conservative early-boot
+     * route works. This keeps a reliable PIC fallback while giving Linux PCI
+     * drivers IOAPIC routing before their initcalls/probes run. */
+    upgrade_interrupt_controller();
 
     if (!irq_core_init()) {
         runtime_initializing = false;
@@ -50,9 +76,6 @@ bool linux_driver_runtime_init(void) {
     pr_info("driver runtime self-test: IRQ, coherent/streaming DMA, workqueues and timers ready");
 #endif
 
-    /* In a BusyBox shell boot the linker exposes only busybox_shell_init here,
-     * so boot falls directly into the interactive Linux userspace process.
-     * Explicit driver-test builds keep the complete initcall/self-test path. */
     if (!run_builtin_initcalls()) {
         runtime_initializing = false;
         return false;
@@ -65,8 +88,6 @@ bool linux_driver_runtime_init(void) {
         return false;
     }
 
-    /* PCI probe has now had a chance to create libata hosts. Publishing them
-     * here keeps the generic Twilight block layer independent of ahci.c. */
     if (linux_storage_publish_block_devices()) {
         pr_info("Linux storage bridge published block device(s) after PCI probe");
     }
@@ -95,8 +116,6 @@ bool linux_driver_runtime_is_initialized(void) {
 void linux_driver_runtime_poll(void) {
     if (!runtime_initialized && !runtime_initializing) return;
 
-    /* NAPI is deliberately outside hard IRQ context. Work/timers can schedule
-     * more device activity, so drain NAPI both before and after them. */
     linux_napi_poll();
     linux_timer_poll();
     linux_workqueue_poll();
