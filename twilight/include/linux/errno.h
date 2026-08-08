@@ -11,6 +11,8 @@
 #define ENODEV      19
 #define EINVAL      22
 #define ENOSPC      28
+#define EROFS       30
+#define ERANGE      34
 #define ENOSYS      38
 #define EOPNOTSUPP  95
 #define ETIMEDOUT  110
