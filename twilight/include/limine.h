@@ -19,6 +19,7 @@
 #define LIMINE_HHDM_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x48dcf1cb8ad2b852, 0x63984e959a98244b }
 #define LIMINE_MEMMAP_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x67cf3d9d378a806f, 0xe304acdfc50c3c62 }
 #define LIMINE_RSDP_REQUEST_ID { LIMINE_COMMON_MAGIC, 0xc5e77b6b397e7b43, 0x27637845accdcf3c }
+#define LIMINE_MODULE_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x3e7e279702be32af, 0xca1c4f3bd1280cee }
 
 #define LIMINE_MEMMAP_USABLE 0
 #define LIMINE_MEMMAP_RESERVED 1
@@ -29,6 +30,42 @@
 #define LIMINE_MEMMAP_EXECUTABLE_AND_MODULES 6
 #define LIMINE_MEMMAP_FRAMEBUFFER 7
 #define LIMINE_MEMMAP_RESERVED_MAPPED 8
+
+struct limine_uuid {
+    uint32_t a;
+    uint16_t b;
+    uint16_t c;
+    uint8_t d[8];
+};
+
+struct limine_file {
+    uint64_t revision;
+    void *address;
+    uint64_t size;
+    char *path;
+    char *cmdline;
+    uint32_t media_type;
+    uint32_t unused;
+    uint32_t tftp_ip;
+    uint32_t tftp_port;
+    uint32_t partition_index;
+    uint32_t mbr_disk_id;
+    struct limine_uuid gpt_disk_uuid;
+    struct limine_uuid gpt_part_uuid;
+    struct limine_uuid part_uuid;
+};
+
+struct limine_module_response {
+    uint64_t revision;
+    uint64_t module_count;
+    struct limine_file **modules;
+};
+
+struct limine_module_request {
+    uint64_t id[4];
+    uint64_t revision;
+    struct limine_module_response *response;
+};
 
 struct limine_hhdm_response {
     uint64_t revision;
