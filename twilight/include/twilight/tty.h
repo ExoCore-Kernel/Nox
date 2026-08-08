@@ -16,6 +16,8 @@ void tty_input_sequence(const char *bytes, size_t length);
 
 /* Poll COM1 and enqueue any received bytes. */
 void tty_poll_serial_input(void);
+bool tty_input_available(void);
+void tty_wait_for_input(void);
 
 /* Blocking single-byte input. Requires the PIT/interrupt path to be alive;
  * it temporarily enables interrupts while waiting so PS/2 IRQ1 can wake it. */
