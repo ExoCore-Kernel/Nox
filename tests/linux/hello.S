@@ -6,7 +6,7 @@ _start:
     movq $1, %rax
     movq $1, %rdi
     leaq message(%rip), %rsi
-    movq $(message_end - message), %rdx
+    movq $message_len, %rdx
     syscall
 
     /* Linux x86-64: exit_group(0). */
@@ -22,3 +22,4 @@ _start:
 message:
     .ascii "Hello from an x86-64 Linux ELF running on Twilight!\n"
 message_end:
+.equ message_len, message_end - message
