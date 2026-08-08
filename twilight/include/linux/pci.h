@@ -7,9 +7,11 @@
 #include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <linux/io.h>
+#include <linux/kernel.h>
 #include <linux/types.h>
 
 #define PCI_ANY_ID (~0u)
+#define PCI_VENDOR_ID_INTEL   0x8086u
 #define PCI_VENDOR_ID_REDHAT  0x1b36u
 #define PCI_VENDOR_ID_REALTEK 0x10ecu
 #define PCI_DEVICE_ID_REALTEK_8139 0x8139u
@@ -19,6 +21,7 @@
 #define PCI_COMMAND_IO       0x0001
 #define PCI_COMMAND_MEMORY   0x0002
 #define PCI_COMMAND_MASTER   0x0004
+#define PCI_COMMAND_INTX_DISABLE 0x0400
 #define PCI_STATUS           0x06
 #define PCI_STATUS_CAP_LIST  0x0010
 #define PCI_REVISION_ID      0x08
@@ -28,6 +31,10 @@
 #define PCI_CAPABILITY_LIST  0x34
 #define PCI_INTERRUPT_LINE   0x3c
 #define PCI_INTERRUPT_PIN    0x3d
+
+#define PCI_CLASS_STORAGE_IDE  0x0101
+#define PCI_CLASS_STORAGE_SATA 0x0106
+#define PCI_CLASS_STORAGE_RAID 0x0104
 
 #define PCI_CAP_ID_PM        0x01
 #define PCI_CAP_ID_MSI       0x05
@@ -67,6 +74,7 @@ struct pci_dev {
     u8 revision;
     unsigned int irq;
     struct twilight_pci_device *twilight;
+    void __iomem *iomap_table[6];
 };
 
 struct pci_driver {
@@ -94,6 +102,12 @@ struct pci_driver {
     .subvendor = PCI_ANY_ID, .subdevice = PCI_ANY_ID, \
     .class = (dev_class), .class_mask = (dev_class_mask)
 
+#define PCI_VDEVICE(vendor, dev) \
+    .vendor = PCI_VENDOR_ID_##vendor, .device = (dev), \
+    .subvendor = PCI_ANY_ID, .subdevice = PCI_ANY_ID
+
+#define to_pci_dev(device_pointer) container_of((device_pointer), struct pci_dev, dev)
+
 int pci_register_driver(struct pci_driver *driver);
 void pci_unregister_driver(struct pci_driver *driver);
 int linux_pci_register_builtin_drivers(void);
@@ -108,6 +122,7 @@ void pci_disable_device(struct pci_dev *pdev);
 int pcim_enable_device(struct pci_dev *pdev);
 void pci_set_master(struct pci_dev *pdev);
 void pci_clear_master(struct pci_dev *pdev);
+void pci_intx(struct pci_dev *pdev, int enable);
 
 resource_size_t pci_resource_start(struct pci_dev *pdev, int bar);
 resource_size_t pci_resource_len(struct pci_dev *pdev, int bar);
@@ -121,6 +136,9 @@ static inline resource_size_t pci_resource_end(struct pci_dev *pdev, int bar) {
 void __iomem *pci_iomap(struct pci_dev *pdev, int bar, unsigned long maxlen);
 void pci_iounmap(struct pci_dev *pdev, void __iomem *address);
 void __iomem *pcim_iomap(struct pci_dev *pdev, int bar, unsigned long maxlen);
+int pcim_iomap_regions(struct pci_dev *pdev, int mask, const char *name);
+void __iomem **pcim_iomap_table(struct pci_dev *pdev);
+void pcim_pin_device(struct pci_dev *pdev);
 
 int pci_request_regions(struct pci_dev *pdev, const char *name);
 void pci_release_regions(struct pci_dev *pdev);
@@ -153,6 +171,13 @@ static inline int pci_enable_msi(struct pci_dev *pdev) {
     return -ENOSYS;
 }
 static inline void pci_disable_msi(struct pci_dev *pdev) { (void)pdev; }
+
+static inline int pci_set_dma_mask(struct pci_dev *pdev, u64 mask) {
+    return pdev != 0 ? dma_set_mask(&pdev->dev, mask) : -EINVAL;
+}
+static inline int pci_set_consistent_dma_mask(struct pci_dev *pdev, u64 mask) {
+    return pdev != 0 ? dma_set_coherent_mask(&pdev->dev, mask) : -EINVAL;
+}
 
 #define module_pci_driver(__pci_driver) \
     static struct pci_driver * const \
