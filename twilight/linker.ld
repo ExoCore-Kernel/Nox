@@ -33,6 +33,10 @@ SECTIONS {
          * dedicated section so their module_init functions still execute in
          * BusyBox/Bash boots while unrelated bring-up self-tests stay quiet. */
         KEEP(*(.twilight_driver_initcalls))
+        /* Re-read driver ownership after exact upstream module_init calls.
+         * This makes the final PCI BIND inventory reflect the real post-probe
+         * state used by the hardware matrices. */
+        KEEP(*(.twilight_post_driver_initcalls))
         /* BusyBox shell boots place non-driver module_init calls into named
          * subsections; only the interactive shell is executable at boot. */
         KEEP(*(.twilight_initcalls.busybox_shell_init))
