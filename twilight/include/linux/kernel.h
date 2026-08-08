@@ -16,6 +16,8 @@
 
 #define min(a, b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a < _b ? _a : _b; })
 #define max(a, b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a > _b ? _a : _b; })
+#define min_t(type, a, b) ({ type _a = (a); type _b = (b); _a < _b ? _a : _b; })
+#define max_t(type, a, b) ({ type _a = (a); type _b = (b); _a > _b ? _a : _b; })
 #define clamp(v, lo, hi) min(max((v), (lo)), (hi))
 
 #define ALIGN(value, alignment) \
@@ -33,6 +35,12 @@
 } while (0)
 
 #define barrier() __asm__ volatile ("" ::: "memory")
+#define WARN_ON(condition) (!!(condition))
+
+static inline int fls(int value) {
+    if (value == 0) return 0;
+    return (int)(sizeof(unsigned int) * 8u - (unsigned int)__builtin_clz((unsigned int)value));
+}
 
 #define ERR_PTR(error) ((void *)(intptr_t)(error))
 #define PTR_ERR(pointer) ((long)(intptr_t)(pointer))
@@ -70,6 +78,4 @@ static inline char *print_mac(char *buffer, const u8 *address) {
     return buffer;
 }
 
-/* Enough for the driver's low-memory warning path; a real token-bucket rate
- * limiter can replace this when the logging subsystem grows one. */
 static inline int net_ratelimit(void) { return 1; }
