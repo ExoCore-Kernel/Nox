@@ -12,6 +12,7 @@ HEAP_SELF_TEST ?= 1
 USERMODE_SELF_TEST ?= 1
 LINUX_COMPAT_SELF_TEST ?= 1
 SCROLL_SELF_TEST ?= 0
+STORAGE_SELF_TEST ?= 0
 UPSTREAM_8139 ?= 0
 UPSTREAM_AHCI ?= 0
 TPM_STATE_DIR ?= .nox-tpm-state
@@ -81,6 +82,7 @@ CFLAGS := \
 	-DTWILIGHT_USERMODE_SELF_TEST=$(USERMODE_SELF_TEST) \
 	-DTWILIGHT_LINUX_COMPAT_SELF_TEST=$(LINUX_COMPAT_SELF_TEST) \
 	-DTWILIGHT_SCROLL_SELF_TEST=$(SCROLL_SELF_TEST) \
+	-DTWILIGHT_STORAGE_SELF_TEST=$(STORAGE_SELF_TEST) \
 	-Itwilight/include
 
 ASFLAGS := \
@@ -221,11 +223,13 @@ run-upstream-ethernet-test:
 
 # Strict AHCI compatibility test. The Linux source is hash-pinned and compiled
 # unchanged; Twilight supplies the libata compatibility boundary around it.
+# STORAGE_SELF_TEST=1 enables a destructive write/read check only on this
+# generated disposable disk; normal builds leave automatic writes disabled.
 run-upstream-ahci-test:
-	@$(MAKE) BUILD_DIR=$(UPSTREAM_AHCI_TEST_BUILD_DIR) UPSTREAM_AHCI=1 iso
+	@$(MAKE) BUILD_DIR=$(UPSTREAM_AHCI_TEST_BUILD_DIR) UPSTREAM_AHCI=1 STORAGE_SELF_TEST=1 iso
 	@$(PYTHON) scripts/make-ahci-test-disk.py $(UPSTREAM_AHCI_TEST_DISK)
 	@echo "Running Twilight with UNMODIFIED upstream Linux v2.6.24 ahci.c + QEMU ICH9 AHCI"
-	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-device ich9-ahci,id=ahci -drive if=none,id=ahcidisk,format=raw,file=$(UPSTREAM_AHCI_TEST_DISK) -device ide-hd,drive=ahcidisk,bus=ahci.0" sh scripts/run-qemu.sh auto pc $(UPSTREAM_AHCI_TEST_ISO)
+	@QEMU="$(QEMU)" QEMU_EXTRA_ARGS="-boot d -device ich9-ahci,id=ahci -drive if=none,id=ahcidisk,format=raw,file=$(UPSTREAM_AHCI_TEST_DISK) -device ide-hd,drive=ahcidisk,bus=ahci.0" sh scripts/run-qemu.sh auto pc $(UPSTREAM_AHCI_TEST_ISO)
 
 run-tpm: iso
 	@echo "Running Twilight with persistent emulated TPM 2.0 (CRB frontend)"
