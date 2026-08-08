@@ -109,7 +109,8 @@ ASFLAGS := \
 	-ffreestanding \
 	-m64 \
 	-march=x86-64 \
-	-mno-red-zone
+	-mno-red-zone \
+	-DTWILIGHT_BUSYBOX_SELF_TEST=$(BUSYBOX_SELF_TEST)
 
 LDFLAGS := \
 	-m elf_x86_64 \
@@ -253,10 +254,11 @@ run-q35: iso
 	@echo "Running Twilight on QEMU q35 (auto display detection; APIC/IOAPIC support still recommended)"
 	@QEMU="$(QEMU)" sh scripts/run-qemu.sh auto q35 $(ISO)
 
-# Official, unmodified BusyBox.org x86_64-musl binary. The hello ELF still runs
-# first as a control, then BusyBox runs its echo applet via the same Linux ABI.
+# Official, unmodified BusyBox.org x86_64-musl binary. This isolated build
+# routes native SYSCALL into the broader BusyBox ABI dispatcher rather than the
+# tiny hello-world dispatcher.
 run-busybox-test:
-	@$(MAKE) BUILD_DIR=$(BUSYBOX_TEST_BUILD_DIR) BUSYBOX_SELF_TEST=1 iso
+	@$(MAKE) BUILD_DIR=$(BUSYBOX_TEST_BUILD_DIR) LINUX_USER_SELF_TEST=0 BUSYBOX_SELF_TEST=1 iso
 	@echo "Running Twilight with official UNMODIFIED BusyBox 1.35.0 x86_64-musl"
 	@QEMU="$(QEMU)" sh scripts/run-qemu.sh auto pc $(BUSYBOX_TEST_ISO)
 
