@@ -56,10 +56,12 @@ stop_qemu() {
 
 normalize_bindings() {
     log="$1"
-    # Drop the BDF and IRQ because adding a QEMU device may renumber them. Keep
-    # vendor/device ID, class and bound-driver identity. Duplicate lines remain
-    # duplicated, so adding a second identical device is still detected by comm.
+    # Serial files may contain CRLF. Strip CR first so driver=NONE comparisons
+    # are exact and do not accidentally classify an unbound device as bound.
+    # Drop BDF and IRQ because adding a device may renumber them. Keep the
+    # vendor/device ID, class and bound-driver identity.
     grep 'PCI BIND ' "$log" 2>/dev/null | \
+        tr -d '\r' | \
         sed -E 's/^.*PCI BIND [^ ]+ //' | \
         sed -E 's/ irq=[0-9]+ / /' | \
         sort || true
@@ -74,7 +76,7 @@ report_driver_delta() {
     normalize_bindings "$log" >"$current"
 
     if [ "$name" = "baseline" ]; then
-        cp "$current" "$BASELINE_BINDINGS"
+        # current is already exactly $BASELINE_BINDINGS for the baseline case.
         echo "DRIVER STATUS: baseline inventory captured"
         return 0
     fi
@@ -94,14 +96,15 @@ report_driver_delta() {
     echo "Added PCI function(s):"
     sed 's/^/  /' "$added"
 
-    if grep -q 'driver=NONE$' "$added"; then
-        if grep -v -q 'driver=NONE$' "$added"; then
-            echo "DRIVER STATUS: PARTIAL (at least one added PCI function bound, at least one unbound)"
-        else
-            echo "DRIVER STATUS: DETECTED / NO DRIVER BOUND"
-        fi
-    else
+    unbound_count="$(grep -c 'driver=NONE$' "$added" 2>/dev/null || true)"
+    total_count="$(wc -l <"$added" | tr -d ' ')"
+
+    if [ "$unbound_count" -eq 0 ]; then
         echo "DRIVER STATUS: DRIVER BOUND"
+    elif [ "$unbound_count" -eq "$total_count" ]; then
+        echo "DRIVER STATUS: DETECTED / NO DRIVER BOUND"
+    else
+        echo "DRIVER STATUS: PARTIAL ($((total_count - unbound_count)) bound, $unbound_count unbound)"
     fi
 }
 
@@ -124,6 +127,7 @@ run_case() {
         -m 512M \
         -cdrom "$ISO" \
         -boot d \
+        -nic none \
         -serial "file:$log" \
         -monitor none \
         -display none \
