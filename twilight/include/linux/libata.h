@@ -80,6 +80,11 @@ struct ata_link;
 struct ata_queued_cmd;
 struct ata_device;
 struct ata_host;
+struct pci_dev;
+
+typedef int (*ata_prereset_fn_t)(struct ata_link *, unsigned long);
+typedef int (*ata_reset_fn_t)(struct ata_link *, unsigned int *, unsigned long);
+typedef void (*ata_postreset_fn_t)(struct ata_link *, unsigned int *);
 
 struct ata_ioports {
     void __iomem *cmd_addr;
@@ -235,6 +240,10 @@ static inline struct ata_queued_cmd *ata_qc_from_tag(struct ata_port *ap, unsign
 
 static inline int ata_tag_internal(unsigned int tag) { return tag == ATA_TAG_INTERNAL; }
 static inline int ata_is_ncq(u8 protocol) { return protocol == ATA_PROT_NCQ; }
+static inline int ata_port_is_dummy(const struct ata_port *ap) {
+    return ap == 0 || ap->ops == &ata_dummy_port_ops;
+}
+static inline int ata_ratelimit(void) { return 1; }
 
 #define ata_port_printk(ap, level, format, ...) \
     printk(level "ata%u: " format, (ap) ? (ap)->print_id : 0u, ##__VA_ARGS__)
@@ -261,6 +270,7 @@ int ata_wait_ready(struct ata_port *ap, unsigned long deadline);
 void ata_tf_init(struct ata_device *dev, struct ata_taskfile *tf);
 void ata_tf_to_fis(const struct ata_taskfile *tf, u8 pmp, int is_cmd, u8 *fis);
 void ata_tf_from_fis(const u8 *fis, struct ata_taskfile *tf);
+unsigned int ata_dev_classify(const struct ata_taskfile *tf);
 
 void ata_noop_dev_select(struct ata_port *ap, unsigned int device);
 int sata_pmp_qc_defer_cmd_switch(struct ata_queued_cmd *qc);
@@ -274,6 +284,7 @@ void sata_async_notification(struct ata_port *ap);
 
 int ata_link_offline(struct ata_link *link);
 int ata_link_online(struct ata_link *link);
+int ata_std_prereset(struct ata_link *link, unsigned long deadline);
 int sata_std_hardreset(struct ata_link *link, unsigned int *class, unsigned long deadline);
 int sata_link_hardreset(struct ata_link *link, const unsigned long *timing, unsigned long deadline);
 const unsigned long *sata_ehc_deb_timing(struct ata_eh_context *ehc);
@@ -283,6 +294,14 @@ int sata_pmp_std_prereset(struct ata_link *link, unsigned long deadline);
 int sata_pmp_std_hardreset(struct ata_link *link, unsigned int *class, unsigned long deadline);
 void sata_pmp_std_postreset(struct ata_link *link, unsigned int *classes);
 void ata_std_error_handler(struct ata_port *ap);
+void ata_do_eh(struct ata_port *ap, ata_prereset_fn_t prereset,
+               ata_reset_fn_t softreset, ata_reset_fn_t hardreset,
+               ata_postreset_fn_t postreset);
+void sata_pmp_do_eh(struct ata_port *ap,
+                    ata_prereset_fn_t prereset, ata_reset_fn_t softreset,
+                    ata_reset_fn_t hardreset, ata_postreset_fn_t postreset,
+                    ata_prereset_fn_t pmp_prereset, ata_reset_fn_t pmp_softreset,
+                    ata_reset_fn_t pmp_hardreset, ata_postreset_fn_t pmp_postreset);
 
 int ata_scsi_ioctl(struct scsi_device *dev, int cmd, void *arg);
 int ata_scsi_queuecmd(struct scsi_cmnd *cmd, void (*done)(struct scsi_cmnd *));
