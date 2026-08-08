@@ -137,7 +137,9 @@ run_case() {
 
     while [ "$elapsed" -lt "$TIMEOUT_SECONDS" ]; do
         if grep -q '\[panic\]' "$log" 2>/dev/null || \
-           grep -q '\[serial\] FATAL:' "$log" 2>/dev/null; then
+           grep -q '\[serial\] FATAL:' "$log" 2>/dev/null || \
+           grep -q '\[linux:error\] PCI shell preflight:.*failed' "$log" 2>/dev/null || \
+           grep -q '\[linux:error\] Linux module initcall failed:' "$log" 2>/dev/null; then
             outcome="fail"
             break
         fi
@@ -163,12 +165,12 @@ run_case() {
         pass)
             echo "RESULT: BOOT PASS (GNU Bash userspace reached after ~${elapsed}s)"
             report_driver_delta "$name" "$log"
-            grep -E 'PCI BIND|IOAPIC|Local APIC|driver|Ethernet|AHCI|NVMe|virtio|USB|HDA|bash-shell|nox#' "$log" | tail -n 80 || true
+            grep -E 'PCI shell preflight|PCI BIND|IOAPIC|Local APIC|driver|Ethernet|AHCI|NVMe|virtio|USB|HDA|bash-shell|nox#' "$log" | tail -n 100 || true
             return 0
             ;;
         fail)
-            echo "RESULT: BOOT FAIL (kernel panic/fatal after ~${elapsed}s)"
-            grep -E '\[panic\]|\[serial\] FATAL:|unsupported syscall|IOAPIC|APIC|PCI|driver' "$log" | tail -n 80 || true
+            echo "RESULT: INIT/BOOT FAIL (after ~${elapsed}s)"
+            grep -E '\[panic\]|\[serial\] FATAL:|\[linux:error\]|PCI shell preflight|PCI BIND|unsupported syscall|IOAPIC|APIC|PCI|driver' "$log" | tail -n 100 || true
             return 1
             ;;
         exited)
