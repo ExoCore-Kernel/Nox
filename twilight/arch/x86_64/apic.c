@@ -128,9 +128,6 @@ static bool map_and_enable_xapic(void) {
     const uint64_t verify_physical = usable_apic_physical(verify);
     if (verify_physical == 0) return false;
 
-    /* Use the cache-disabled MMIO mapper when available. The HHDM fallback is
-     * retained for very early diagnostics, but normal boot reaches this after
-     * mmio_init(). */
     if (mmio_is_initialized())
         lapic_mmio = (volatile uint32_t *)mmio_map(verify_physical, 4096u);
     if (lapic_mmio == 0)
@@ -151,18 +148,15 @@ bool apic_disable_for_legacy_pic(void) {
 
     if (!cpu_has_apic()) return false;
 
-    set_imcr_route(false);
-
-    uint64_t base = rdmsr(IA32_APIC_BASE_MSR);
+    /* Historical callers invoke this before the platform interrupt controller
+     * is selected. Do NOT actually disable the local APIC here: q35 needs the
+     * LAPIC left intact so pic_init() can immediately choose MADT/IOAPIC native
+     * routing. For a true 8259 fallback, routing the chipset INTR line directly
+     * to the CPU is sufficient; machines launched with apic=off still report no
+     * APIC above and follow the same legacy path as before. */
+    const uint64_t base = rdmsr(IA32_APIC_BASE_MSR);
     (void)usable_apic_physical(base);
-    if ((base & IA32_APIC_BASE_X2APIC) != 0) {
-        base &= ~(IA32_APIC_BASE_ENABLE | IA32_APIC_BASE_X2APIC);
-        wrmsr(IA32_APIC_BASE_MSR, base);
-        return true;
-    }
-
-    base &= ~IA32_APIC_BASE_ENABLE;
-    wrmsr(IA32_APIC_BASE_MSR, base);
+    set_imcr_route(false);
     return true;
 }
 
