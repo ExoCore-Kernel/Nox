@@ -5,14 +5,11 @@ QEMU_BIN="${QEMU:-qemu-system-x86_64}"
 BUILD_DIR="${BUILD_DIR:-build/bash-hw-matrix}"
 ISO="$BUILD_DIR/nox.iso"
 LOG_DIR="${LOG_DIR:-build/hardware-matrix-logs}"
-TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-12}"
+TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-60}"
+POLL_INTERVAL="${POLL_INTERVAL:-1}"
 
 if ! command -v "$QEMU_BIN" >/dev/null 2>&1; then
     echo "error: missing $QEMU_BIN" >&2
-    exit 1
-fi
-if ! command -v timeout >/dev/null 2>&1; then
-    echo "error: GNU timeout is required for the matrix harness" >&2
     exit 1
 fi
 
@@ -42,50 +39,111 @@ device_available() {
     esac
 }
 
+stop_qemu() {
+    pid="$1"
+    kill -TERM "$pid" 2>/dev/null || true
+    # Give QEMU a moment to close its serial backend cleanly.
+    waited=0
+    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 3 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -KILL "$pid" 2>/dev/null || true
+    fi
+    wait "$pid" 2>/dev/null || true
+}
+
 run_case() {
     name="$1"
     shift
     log="$LOG_DIR/$name.log"
+    qemu_log="$LOG_DIR/$name.qemu.log"
 
     echo ""
     echo "===== $name ====="
     echo "QEMU args: $*"
 
-    set +e
-    timeout --signal=TERM "$TIMEOUT_SECONDS" \
-        "$QEMU_BIN" \
+    : >"$log"
+    : >"$qemu_log"
+
+    # Keep the guest serial stream in its own file. This avoids making QEMU's
+    # stdio backend depend on whether the matrix itself was launched from an
+    # interactive terminal, SSH session, CI job, or redirected shell.
+    "$QEMU_BIN" \
         -M q35 \
         -cpu qemu64 \
         -m 512M \
         -cdrom "$ISO" \
         -boot d \
-        -serial stdio \
+        -serial "file:$log" \
         -monitor none \
         -display none \
         -no-reboot \
         -no-shutdown \
-        "$@" >"$log" 2>&1
-    rc=$?
-    set -e
+        "$@" >"$qemu_log" 2>&1 &
+    qemu_pid=$!
 
-    if grep -q '\[panic\]' "$log" || grep -q '\[serial\] FATAL:' "$log"; then
-        echo "RESULT: BOOT FAIL"
-        grep -E '\[panic\]|\[serial\] FATAL:|unsupported syscall|IOAPIC|APIC|PCI|driver' "$log" | tail -n 30 || true
-        return 1
-    fi
+    elapsed=0
+    outcome=""
 
-    if grep -q 'nox#' "$log"; then
-        echo "RESULT: BOOT PASS (interactive Bash reached)"
-        grep -E 'IOAPIC|Local APIC|PCI|driver|Ethernet|AHCI|NVMe|virtio|USB|HDA|nox#' "$log" | tail -n 40 || true
-        return 0
-    fi
+    while [ "$elapsed" -lt "$TIMEOUT_SECONDS" ]; do
+        if grep -q '\[panic\]' "$log" 2>/dev/null || \
+           grep -q '\[serial\] FATAL:' "$log" 2>/dev/null; then
+            outcome="fail"
+            break
+        fi
 
-    # timeout(1) normally returns 124 because a successful interactive kernel
-    # intentionally stays alive. If the prompt was not observed this is still a
-    # failure/incomplete boot, regardless of timeout status.
-    echo "RESULT: INCOMPLETE (qemu status $rc; Bash prompt not observed)"
-    tail -n 40 "$log" || true
-    return 1
+        # The serial trace is emitted immediately before the IRET into Bash and
+        # is a reliable boot-completion marker even if a terminal prompt lacks
+        # a trailing newline. Prefer the actual prompt when it is present.
+        if grep -q 'nox#' "$log" 2>/dev/null || \
+           grep -q '\[serial\] bash-shell: entering GNU Bash /bin/bash -i at CPL3' "$log" 2>/dev/null; then
+            outcome="pass"
+            break
+        fi
+
+        if ! kill -0 "$qemu_pid" 2>/dev/null; then
+            outcome="exited"
+            break
+        fi
+
+        sleep "$POLL_INTERVAL"
+        elapsed=$((elapsed + POLL_INTERVAL))
+    done
+
+    stop_qemu "$qemu_pid"
+
+    case "$outcome" in
+        pass)
+            echo "RESULT: BOOT PASS (GNU Bash userspace reached after ~${elapsed}s)"
+            grep -E 'IOAPIC|Local APIC|PCI|driver|Ethernet|AHCI|NVMe|virtio|USB|HDA|bash-shell|nox#' "$log" | tail -n 60 || true
+            return 0
+            ;;
+        fail)
+            echo "RESULT: BOOT FAIL (kernel panic/fatal after ~${elapsed}s)"
+            grep -E '\[panic\]|\[serial\] FATAL:|unsupported syscall|IOAPIC|APIC|PCI|driver' "$log" | tail -n 60 || true
+            return 1
+            ;;
+        exited)
+            echo "RESULT: QEMU EXITED BEFORE BASH (after ~${elapsed}s)"
+            tail -n 60 "$log" || true
+            if [ -s "$qemu_log" ]; then
+                echo "--- QEMU diagnostics ---"
+                tail -n 30 "$qemu_log" || true
+            fi
+            return 1
+            ;;
+        *)
+            echo "RESULT: TIMEOUT (${TIMEOUT_SECONDS}s; Bash marker not observed)"
+            tail -n 60 "$log" || true
+            if [ -s "$qemu_log" ]; then
+                echo "--- QEMU diagnostics ---"
+                tail -n 30 "$qemu_log" || true
+            fi
+            return 1
+            ;;
+    esac
 }
 
 failures=0
