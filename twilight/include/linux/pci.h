@@ -11,11 +11,18 @@
 #include <linux/types.h>
 
 #define PCI_ANY_ID (~0u)
-#define PCI_VENDOR_ID_INTEL   0x8086u
-#define PCI_VENDOR_ID_REDHAT  0x1b36u
-#define PCI_VENDOR_ID_REALTEK 0x10ecu
+#define PCI_VENDOR_ID_ATI      0x1002u
+#define PCI_VENDOR_ID_SI       0x1039u
+#define PCI_VENDOR_ID_VIA      0x1106u
+#define PCI_VENDOR_ID_MARVELL  0x11abu
+#define PCI_VENDOR_ID_AL       0x10b9u
+#define PCI_VENDOR_ID_NVIDIA   0x10deu
+#define PCI_VENDOR_ID_JMICRON  0x197bu
+#define PCI_VENDOR_ID_INTEL    0x8086u
+#define PCI_VENDOR_ID_REDHAT   0x1b36u
+#define PCI_VENDOR_ID_REALTEK  0x10ecu
 #define PCI_DEVICE_ID_REALTEK_8139 0x8139u
-#define PCI_VENDOR_ID_ATHEROS 0x168cu
+#define PCI_VENDOR_ID_ATHEROS  0x168cu
 
 #define PCI_COMMAND          0x04
 #define PCI_COMMAND_IO       0x0001
@@ -32,9 +39,10 @@
 #define PCI_INTERRUPT_LINE   0x3c
 #define PCI_INTERRUPT_PIN    0x3d
 
-#define PCI_CLASS_STORAGE_IDE  0x0101
-#define PCI_CLASS_STORAGE_SATA 0x0106
-#define PCI_CLASS_STORAGE_RAID 0x0104
+#define PCI_CLASS_STORAGE_IDE       0x0101
+#define PCI_CLASS_STORAGE_RAID      0x0104
+#define PCI_CLASS_STORAGE_SATA      0x0106
+#define PCI_CLASS_STORAGE_SATA_AHCI 0x010601
 
 #define PCI_CAP_ID_PM        0x01
 #define PCI_CAP_ID_MSI       0x05
