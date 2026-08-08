@@ -110,9 +110,14 @@ struct pci_driver {
     .subvendor = PCI_ANY_ID, .subdevice = PCI_ANY_ID, \
     .class = (dev_class), .class_mask = (dev_class_mask)
 
+/* Linux v2.6-era PCI tables commonly use:
+ *   { PCI_VDEVICE(INTEL, 0x2922), board_ahci }
+ * so this initializer must consume the class/class_mask fields too; the
+ * trailing positional initializer then correctly lands in driver_data. */
 #define PCI_VDEVICE(vendor, dev) \
     .vendor = PCI_VENDOR_ID_##vendor, .device = (dev), \
-    .subvendor = PCI_ANY_ID, .subdevice = PCI_ANY_ID
+    .subvendor = PCI_ANY_ID, .subdevice = PCI_ANY_ID, \
+    .class = 0, .class_mask = 0
 
 #define to_pci_dev(device_pointer) container_of((device_pointer), struct pci_dev, dev)
 
