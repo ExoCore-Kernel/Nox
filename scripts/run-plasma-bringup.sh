@@ -5,6 +5,7 @@ BUILD_DIR="${BUILD_DIR:-build/plasma-bringup}"
 ISO_ROOT="$BUILD_DIR/iso_root"
 ISO="$BUILD_DIR/nox-plasma.iso"
 ROOTFS="$BUILD_DIR/plasma-rootfs.cpio"
+ROOTFS_KIND="${PLASMA_ROOTFS:-tiny}"
 PYTHON="${PYTHON:-python3}"
 LIMINE="${LIMINE:-limine}"
 QEMU="${QEMU:-qemu-system-x86_64}"
@@ -23,7 +24,20 @@ make BUILD_DIR="$BUILD_DIR" \
     BASH_SHELL=1 \
     twilight limine
 
-"$PYTHON" scripts/make-plasma-rootfs.py "$ROOTFS"
+case "$ROOTFS_KIND" in
+    tiny)
+        echo "Plasma rootfs mode: tiny CPIO protocol sanity test"
+        "$PYTHON" scripts/make-plasma-rootfs.py "$ROOTFS"
+        ;;
+    alpine)
+        echo "Plasma rootfs mode: real Alpine 3.24.1 x86_64 minirootfs"
+        "$PYTHON" scripts/fetch-alpine-plasma-base.py "$ROOTFS"
+        ;;
+    *)
+        echo "error: PLASMA_ROOTFS must be 'tiny' or 'alpine'" >&2
+        exit 2
+        ;;
+esac
 
 rm -rf "$ISO_ROOT"
 mkdir -p "$ISO_ROOT/boot/limine" "$ISO_ROOT/EFI/BOOT"
@@ -47,6 +61,7 @@ xorriso -as mkisofs \
 
 echo ""
 echo "Plasma bring-up ISO: $ISO"
+echo "Rootfs mode: $ROOTFS_KIND"
 echo "Expected early proof:"
 echo "  [linux] Plasma rootfs mounted from Limine module: ..."
 echo "  [linux] Plasma rootfs probe PASS: /etc/nox-release is readable ..."
