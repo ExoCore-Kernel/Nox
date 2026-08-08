@@ -8,6 +8,10 @@ static inline void msleep(unsigned int milliseconds) {
     timer_sleep_ms(milliseconds);
 }
 
+static inline void ssleep(unsigned int seconds) {
+    timer_sleep_ms((uint64_t)seconds * 1000ull);
+}
+
 static inline void mdelay(unsigned long milliseconds) {
     timer_sleep_ms((uint64_t)milliseconds);
 }
