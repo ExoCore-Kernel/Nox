@@ -113,9 +113,13 @@ struct pci_driver {
 /* Linux v2.6-era PCI tables commonly use:
  *   { PCI_VDEVICE(INTEL, 0x2922), board_ahci }
  * so this initializer must consume the class/class_mask fields too; the
- * trailing positional initializer then correctly lands in driver_data. */
-#define PCI_VDEVICE(vendor, dev) \
-    .vendor = PCI_VENDOR_ID_##vendor, .device = (dev), \
+ * trailing positional initializer then correctly lands in driver_data.
+ *
+ * Keep the macro argument named `vend`, not `vendor`: macro parameters are
+ * substituted as tokens even after '.', so naming it `vendor` would turn
+ * `.vendor` into `.INTEL` for PCI_VDEVICE(INTEL, ...). */
+#define PCI_VDEVICE(vend, dev) \
+    .vendor = PCI_VENDOR_ID_##vend, .device = (dev), \
     .subvendor = PCI_ANY_ID, .subdevice = PCI_ANY_ID, \
     .class = 0, .class_mask = 0
 
