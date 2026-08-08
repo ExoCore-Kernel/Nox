@@ -22,9 +22,28 @@
 #define __exit
 #define __maybe_unused __attribute__((unused))
 
+/* busybox_shell.c uses the native x86-64 Linux readlink syscall number. Keep
+ * this guarded because the older BusyBox echo harness defines the same token
+ * itself. This can move to a wider Linux UAPI syscall-number header later. */
+#if defined(TWILIGHT_BUSYBOX_SELF_TEST) && TWILIGHT_BUSYBOX_SELF_TEST
+#ifndef SYS_READLINK
+#define SYS_READLINK 89ull
+#endif
+#endif
+
+/* In a BusyBox boot we no longer want every bring-up/self-test initcall to run
+ * before the interactive shell. Give each initcall its own section instead;
+ * the linker deliberately exposes only busybox_shell_init to the runtime's
+ * initcall range. Normal diagnostic/driver builds keep the original section. */
+#if defined(TWILIGHT_BUSYBOX_SELF_TEST) && TWILIGHT_BUSYBOX_SELF_TEST
+#define module_init(fn) \
+    static int (* const __twilight_initcall_##fn)(void) \
+    __attribute__((used, section(".twilight_initcalls." #fn))) = (fn)
+#else
 #define module_init(fn) \
     static int (* const __twilight_initcall_##fn)(void) \
     __attribute__((used, section(".twilight_initcalls"))) = (fn)
+#endif
 
 #define module_exit(fn) \
     static void (* const __twilight_exitcall_##fn)(void) \
