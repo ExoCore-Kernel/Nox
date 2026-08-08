@@ -31,14 +31,22 @@
 #endif
 #endif
 
-/* In a BusyBox boot we no longer want every bring-up/self-test initcall to run
- * before the interactive shell. Give each initcall its own section instead;
- * the linker deliberately exposes only busybox_shell_init to the runtime's
- * initcall range. Normal diagnostic/driver builds keep the original section. */
+/* BusyBox/Bash boots suppress bring-up/self-test module_init calls so the
+ * interactive shell can start quickly. Exact upstream Linux drivers are
+ * compiled with KBUILD_MODNAME, though, and they still need their normal
+ * module_init entry points to execute before userspace. Put those into one
+ * dedicated driver-initcall section that the linker keeps inside the runtime
+ * initcall range. Other BusyBox initcalls remain isolated by function name. */
 #if defined(TWILIGHT_BUSYBOX_SELF_TEST) && TWILIGHT_BUSYBOX_SELF_TEST
+#if defined(KBUILD_MODNAME)
+#define module_init(fn) \
+    static int (* const __twilight_initcall_##fn)(void) \
+    __attribute__((used, section(".twilight_driver_initcalls"))) = (fn)
+#else
 #define module_init(fn) \
     static int (* const __twilight_initcall_##fn)(void) \
     __attribute__((used, section(".twilight_initcalls." #fn))) = (fn)
+#endif
 #else
 #define module_init(fn) \
     static int (* const __twilight_initcall_##fn)(void) \
