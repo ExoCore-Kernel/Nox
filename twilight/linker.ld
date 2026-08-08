@@ -29,9 +29,12 @@ SECTIONS {
         . = ALIGN(8);
         __twilight_initcalls_start = .;
         KEEP(*(.twilight_initcalls))
-        /* BusyBox shell boots place every module_init into a named subsection;
-         * only the interactive shell is part of the executable initcall range.
-         * Other test initcalls remain linked but are not executed at boot. */
+        /* Exact upstream Linux drivers compiled with KBUILD_MODNAME use a
+         * dedicated section so their module_init functions still execute in
+         * BusyBox/Bash boots while unrelated bring-up self-tests stay quiet. */
+        KEEP(*(.twilight_driver_initcalls))
+        /* BusyBox shell boots place non-driver module_init calls into named
+         * subsections; only the interactive shell is executable at boot. */
         KEEP(*(.twilight_initcalls.busybox_shell_init))
         __twilight_initcalls_end = .;
         . = ALIGN(8);
