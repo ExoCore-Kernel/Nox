@@ -2,7 +2,11 @@
 
 .extern gdt_tss
 .extern user_syscall_dispatch
+#if TWILIGHT_BUSYBOX_SELF_TEST
+.extern linux_busybox_syscall_dispatch
+#else
 .extern linux_syscall_dispatch
+#endif
 
 /*
  * Enter a separate user address space without ever running C on an arbitrary
@@ -166,7 +170,11 @@ linux_syscall_entry:
     movq linux_saved_arg3(%rip), %rcx
     movq linux_saved_arg4(%rip), %r8
     movq linux_saved_arg5(%rip), %r9
+#if TWILIGHT_BUSYBOX_SELF_TEST
+    call linux_busybox_syscall_dispatch
+#else
     call linux_syscall_dispatch
+#endif
     addq $16, %rsp
 
     /* INT64_MIN is Twilight's private "process exited" sentinel. Linux errno
