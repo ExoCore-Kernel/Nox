@@ -65,7 +65,7 @@ static void init_port(struct ata_host *host,
 struct ata_host *ata_host_alloc_pinfo(struct device *dev,
                                       const struct ata_port_info * const *ppi,
                                       int n_ports) {
-    if (dev == 0 || ppi == 0 || n_ports <= 0) return 0;
+    if (dev == 0 || ppi == 0 || ppi[0] == 0 || n_ports <= 0) return 0;
 
     struct ata_host *host = kzalloc(sizeof(*host), GFP_KERNEL);
     if (host == 0) return 0;
@@ -78,16 +78,20 @@ struct ata_host *ata_host_alloc_pinfo(struct device *dev,
 
     host->dev = dev;
     host->n_ports = (unsigned int)n_ports;
+    host->ops = ppi[0]->port_ops;
     spin_lock_init(&host->lock);
 
+    /* The v2.6 libata convention used by ahci.c is ppi={&pi,NULL}: the final
+     * non-NULL port-info is reused for all remaining ports. AHCI has one
+     * homogeneous port-info, so entry zero is the correct template for every
+     * port and avoids reading beyond the sentinel array. */
     for (int i = 0; i < n_ports; ++i) {
         host->ports[i] = kzalloc(sizeof(*host->ports[i]), GFP_KERNEL);
         if (host->ports[i] == 0) {
             ata_host_detach(host);
             return 0;
         }
-        const struct ata_port_info *pi = ppi[i] != 0 ? ppi[i] : ppi[0];
-        init_port(host, host->ports[i], pi, (unsigned int)i);
+        init_port(host, host->ports[i], ppi[0], (unsigned int)i);
     }
 
     return host;
@@ -141,6 +145,8 @@ static int issue_polled_qc(struct ata_port *ap,
     ap->link.active_tag = 0;
     ap->qc_active = 1u;
 
+    /* These callbacks are the functions from the untouched Linux ahci.c:
+     * ahci_qc_prep() creates the H2D FIS/PRDT and ahci_qc_issue() writes PxCI. */
     ap->ops->qc_prep(qc);
 
     unsigned long irq_flags;
@@ -265,7 +271,7 @@ int ata_host_activate(struct ata_host *host, int irq,
 
     for (unsigned int i = 0; i < host->n_ports; ++i) {
         struct ata_port *ap = host->ports[i];
-        if (ap == 0 || ap->ops == &ata_dummy_port_ops || ap->ioaddr.cmd_addr == 0) continue;
+        if (ata_port_is_dummy(ap) || ap->ioaddr.cmd_addr == 0) continue;
         if (ap->ops->port_start != 0) {
             const int rc = ap->ops->port_start(ap);
             if (rc != 0) {
@@ -286,7 +292,7 @@ int ata_host_activate(struct ata_host *host, int irq,
     int first_result = -ENODEV;
     for (unsigned int i = 0; i < host->n_ports; ++i) {
         struct ata_port *ap = host->ports[i];
-        if (ap == 0 || ap->ops == &ata_dummy_port_ops || ap->ioaddr.cmd_addr == 0) continue;
+        if (ata_port_is_dummy(ap) || ap->ioaddr.cmd_addr == 0) continue;
         const int rc = probe_and_read_port(ap);
         if (rc == 0) return 0;
         if (rc != -ENODEV && first_result == -ENODEV) first_result = rc;
@@ -294,6 +300,7 @@ int ata_host_activate(struct ata_host *host, int irq,
 
     if (first_result == -ENODEV)
         printk("[linux:ata] AHCI controller initialized, but no SATA device reported PHY present");
+    free_irq((unsigned int)irq, host);
     return first_result;
 }
 
@@ -400,6 +407,14 @@ void ata_tf_from_fis(const u8 *fis, struct ata_taskfile *tf) {
     tf->hob_nsect = fis[13];
 }
 
+unsigned int ata_dev_classify(const struct ata_taskfile *tf) {
+    if (tf == 0) return ATA_DEV_UNKNOWN;
+    if (tf->lbam == 0x00 && tf->lbah == 0x00) return ATA_DEV_ATA;
+    if (tf->lbam == 0x14 && tf->lbah == 0xeb) return ATA_DEV_ATAPI;
+    if (tf->lbam == 0x69 && tf->lbah == 0x96) return ATA_DEV_PMP;
+    return ATA_DEV_UNKNOWN;
+}
+
 void ata_noop_dev_select(struct ata_port *ap, unsigned int device) {
     (void)ap; (void)device;
 }
@@ -454,6 +469,11 @@ int ata_link_online(struct ata_link *link) {
     return link != 0 && port_link_present(link->ap);
 }
 
+int ata_std_prereset(struct ata_link *link, unsigned long deadline) {
+    (void)deadline;
+    return ata_link_online(link) ? 0 : -ENODEV;
+}
+
 int sata_std_hardreset(struct ata_link *link, unsigned int *class, unsigned long deadline) {
     (void)deadline;
     if (class != 0) *class = ata_link_online(link) ? ATA_DEV_ATA : ATA_DEV_NONE;
@@ -477,15 +497,37 @@ void ata_std_postreset(struct ata_link *link, unsigned int *classes) {
 
 void sata_pmp_error_handler(struct ata_port *ap) { (void)ap; }
 int sata_pmp_std_prereset(struct ata_link *link, unsigned long deadline) {
-    (void)link; (void)deadline; return 0;
+    return ata_std_prereset(link, deadline);
 }
 int sata_pmp_std_hardreset(struct ata_link *link, unsigned int *class, unsigned long deadline) {
     return sata_std_hardreset(link, class, deadline);
 }
 void sata_pmp_std_postreset(struct ata_link *link, unsigned int *classes) {
-    (void)link; (void)classes;
+    ata_std_postreset(link, classes);
 }
 void ata_std_error_handler(struct ata_port *ap) { (void)ap; }
+
+void ata_do_eh(struct ata_port *ap, ata_prereset_fn_t prereset,
+               ata_reset_fn_t softreset, ata_reset_fn_t hardreset,
+               ata_postreset_fn_t postreset) {
+    if (ap == 0) return;
+    unsigned int class = ATA_DEV_UNKNOWN;
+    const unsigned long deadline = jiffies + 1000ul;
+    if (prereset != 0 && prereset(&ap->link, deadline) != 0) return;
+    int rc = hardreset != 0 ? hardreset(&ap->link, &class, deadline) : -ENOSYS;
+    if (rc != 0 && softreset != 0) rc = softreset(&ap->link, &class, deadline);
+    if (rc == 0 && postreset != 0) postreset(&ap->link, &class);
+    ap->pflags &= ~ATA_PFLAG_FROZEN;
+}
+
+void sata_pmp_do_eh(struct ata_port *ap,
+                    ata_prereset_fn_t prereset, ata_reset_fn_t softreset,
+                    ata_reset_fn_t hardreset, ata_postreset_fn_t postreset,
+                    ata_prereset_fn_t pmp_prereset, ata_reset_fn_t pmp_softreset,
+                    ata_reset_fn_t pmp_hardreset, ata_postreset_fn_t pmp_postreset) {
+    (void)pmp_prereset; (void)pmp_softreset; (void)pmp_hardreset; (void)pmp_postreset;
+    ata_do_eh(ap, prereset, softreset, hardreset, postreset);
+}
 
 int ata_scsi_ioctl(struct scsi_device *dev, int cmd, void *arg) {
     (void)dev; (void)cmd; (void)arg; return -ENOSYS;
