@@ -11,6 +11,7 @@ VMM_SELF_TEST ?= 1
 HEAP_SELF_TEST ?= 1
 USERMODE_SELF_TEST ?= 1
 LINUX_USER_SELF_TEST ?= 1
+BUSYBOX_SELF_TEST ?= 0
 LINUX_COMPAT_SELF_TEST ?= 1
 SCROLL_SELF_TEST ?= 0
 STORAGE_SELF_TEST ?= 0
@@ -32,6 +33,11 @@ LINUX_HELLO_O := $(GEN_DIR)/linux/hello-linux.o
 LINUX_HELLO_ELF := $(GEN_DIR)/linux/hello-linux.elf
 LINUX_HELLO_C := $(GEN_DIR)/linux/hello-linux-blob.c
 LINUX_HELLO_BLOB_O := $(OBJ_DIR)/generated/linux/hello-linux-blob.o
+BUSYBOX_BIN := $(GEN_DIR)/linux/busybox-1.35.0-x86_64-linux-musl
+BUSYBOX_C := $(GEN_DIR)/linux/busybox-blob.c
+BUSYBOX_BLOB_O := $(OBJ_DIR)/generated/linux/busybox-blob.o
+BUSYBOX_TEST_BUILD_DIR := build/busybox
+BUSYBOX_TEST_ISO := $(BUSYBOX_TEST_BUILD_DIR)/nox.iso
 UPSTREAM_8139_C := $(GEN_DIR)/upstream/8139too.c
 UPSTREAM_8139_O := $(OBJ_DIR)/generated/upstream/8139too.o
 UPSTREAM_TEST_BUILD_DIR := build/upstream-8139
@@ -56,6 +62,9 @@ OBJECTS += $(OBJ_DIR)/generated/font_blob.o
 OBJECTS += $(OBJ_DIR)/generated/version_blob.o
 ifeq ($(LINUX_USER_SELF_TEST),1)
 OBJECTS += $(LINUX_HELLO_BLOB_O)
+endif
+ifeq ($(BUSYBOX_SELF_TEST),1)
+OBJECTS += $(BUSYBOX_BLOB_O)
 endif
 ifeq ($(UPSTREAM_8139),1)
 OBJECTS += $(UPSTREAM_8139_O)
@@ -89,6 +98,7 @@ CFLAGS := \
 	-DTWILIGHT_HEAP_SELF_TEST=$(HEAP_SELF_TEST) \
 	-DTWILIGHT_USERMODE_SELF_TEST=$(USERMODE_SELF_TEST) \
 	-DTWILIGHT_LINUX_USER_SELF_TEST=$(LINUX_USER_SELF_TEST) \
+	-DTWILIGHT_BUSYBOX_SELF_TEST=$(BUSYBOX_SELF_TEST) \
 	-DTWILIGHT_LINUX_COMPAT_SELF_TEST=$(LINUX_COMPAT_SELF_TEST) \
 	-DTWILIGHT_SCROLL_SELF_TEST=$(SCROLL_SELF_TEST) \
 	-DTWILIGHT_STORAGE_SELF_TEST=$(STORAGE_SELF_TEST) \
@@ -108,7 +118,7 @@ LDFLAGS := \
 	-z max-page-size=0x1000 \
 	-T twilight/linker.ld
 
-.PHONY: all twilight font iso run run-gui run-headless run-q35 run-driver-test run-linux-driver-test run-ethernet-test run-upstream-ethernet-test run-upstream-ahci-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
+.PHONY: all twilight font iso run run-gui run-headless run-q35 run-busybox-test run-driver-test run-linux-driver-test run-ethernet-test run-upstream-ethernet-test run-upstream-ahci-test run-tpm tpm-reset limine clean check-tools new-it FORCE_VERSION
 
 all: twilight
 
@@ -146,6 +156,19 @@ $(LINUX_HELLO_C): $(LINUX_HELLO_ELF) scripts/embed-linux-elf.py
 	$(PYTHON) scripts/embed-linux-elf.py $(LINUX_HELLO_ELF) $@
 
 $(LINUX_HELLO_BLOB_O): $(LINUX_HELLO_C)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# BusyBox is not rebuilt or patched: fetch BusyBox.org's official static
+# x86_64-musl executable and embed those exact ELF bytes as temporary transport.
+$(BUSYBOX_BIN): scripts/fetch-busybox.py
+	@mkdir -p $(dir $@)
+	$(PYTHON) scripts/fetch-busybox.py $@
+
+$(BUSYBOX_C): $(BUSYBOX_BIN) scripts/embed-linux-elf.py
+	$(PYTHON) scripts/embed-linux-elf.py $(BUSYBOX_BIN) $@ twilight_busybox_elf
+
+$(BUSYBOX_BLOB_O): $(BUSYBOX_C)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -229,6 +252,13 @@ run-headless: iso
 run-q35: iso
 	@echo "Running Twilight on QEMU q35 (auto display detection; APIC/IOAPIC support still recommended)"
 	@QEMU="$(QEMU)" sh scripts/run-qemu.sh auto q35 $(ISO)
+
+# Official, unmodified BusyBox.org x86_64-musl binary. The hello ELF still runs
+# first as a control, then BusyBox runs its echo applet via the same Linux ABI.
+run-busybox-test:
+	@$(MAKE) BUILD_DIR=$(BUSYBOX_TEST_BUILD_DIR) BUSYBOX_SELF_TEST=1 iso
+	@echo "Running Twilight with official UNMODIFIED BusyBox 1.35.0 x86_64-musl"
+	@QEMU="$(QEMU)" sh scripts/run-qemu.sh auto pc $(BUSYBOX_TEST_ISO)
 
 run-driver-test: iso
 	@echo "Running Twilight with QEMU pci-testdev for Linux-driver compatibility testing"
