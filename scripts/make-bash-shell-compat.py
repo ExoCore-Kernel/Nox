@@ -3,7 +3,7 @@
 
 This does not modify GNU Bash. It only reuses Twilight's userspace/TTY ABI
 shim while changing the process identity exposed to userspace from /bin/sh to
-/bin/bash and adding a few Linux ABI calls used by the static glibc Bash build.
+/bin/bash and adding Linux ABI calls used by the static glibc Bash build.
 """
 
 from __future__ import annotations
@@ -107,6 +107,140 @@ def main() -> int:
     }
 '''
     text = require_replace(text, readlink_case, readlink_with_at)
+
+    # GNU readline uses select/pselect to wait for terminal input. The original
+    # ash bring-up shim returned ENOSYS for both, which Bash can interpret as an
+    # unusable/ended input stream. Implement the Linux fd_set behavior needed by
+    # our early single-TTY process. Finite timeouts are currently treated as
+    # nonblocking polls; an infinite read wait blocks on the IRQ/serial TTY.
+    select_helpers = r'''
+#define BASH_FDSET_BYTES 128u
+
+static bool bash_fdset_test(const uint8_t set[BASH_FDSET_BYTES], unsigned int fd) {
+    if (fd >= BASH_FDSET_BYTES * 8u) return false;
+    return (set[fd >> 3u] & (uint8_t)(1u << (fd & 7u))) != 0;
+}
+
+static void bash_fdset_set(uint8_t set[BASH_FDSET_BYTES], unsigned int fd) {
+    if (fd >= BASH_FDSET_BYTES * 8u) return;
+    set[fd >> 3u] |= (uint8_t)(1u << (fd & 7u));
+}
+
+static bool bash_fdset_has_unsupported(const uint8_t set[BASH_FDSET_BYTES],
+                                       uint64_t nfds) {
+    if (nfds > BASH_FDSET_BYTES * 8u) nfds = BASH_FDSET_BYTES * 8u;
+    for (uint64_t fd = 10; fd < nfds; ++fd)
+        if (bash_fdset_test(set, (unsigned int)fd)) return true;
+    return false;
+}
+
+static int64_t bash_select_tty(uint64_t nfds,
+                               uint64_t read_address,
+                               uint64_t write_address,
+                               uint64_t except_address,
+                               uint64_t timeout_address) {
+    if (nfds > BASH_FDSET_BYTES * 8u) return -LINUX_EINVAL;
+
+    uint8_t requested_read[BASH_FDSET_BYTES];
+    uint8_t requested_write[BASH_FDSET_BYTES];
+    uint8_t requested_except[BASH_FDSET_BYTES];
+    uint8_t result_read[BASH_FDSET_BYTES];
+    uint8_t result_write[BASH_FDSET_BYTES];
+    uint8_t result_except[BASH_FDSET_BYTES];
+    bytes_zero(requested_read, sizeof(requested_read));
+    bytes_zero(requested_write, sizeof(requested_write));
+    bytes_zero(requested_except, sizeof(requested_except));
+
+    if (read_address != 0 &&
+        !user_copy_in(requested_read, read_address, sizeof(requested_read)))
+        return -LINUX_EFAULT;
+    if (write_address != 0 &&
+        !user_copy_in(requested_write, write_address, sizeof(requested_write)))
+        return -LINUX_EFAULT;
+    if (except_address != 0 &&
+        !user_copy_in(requested_except, except_address, sizeof(requested_except)))
+        return -LINUX_EFAULT;
+
+    if (bash_fdset_has_unsupported(requested_read, nfds) ||
+        bash_fdset_has_unsupported(requested_write, nfds) ||
+        bash_fdset_has_unsupported(requested_except, nfds))
+        return -LINUX_EBADF;
+
+    const bool finite_timeout = timeout_address != 0;
+
+    for (;;) {
+        bytes_zero(result_read, sizeof(result_read));
+        bytes_zero(result_write, sizeof(result_write));
+        bytes_zero(result_except, sizeof(result_except));
+        bool ready_fd[10] = { false, false, false, false, false,
+                              false, false, false, false, false };
+
+        const bool input_ready = tty_input_available();
+        for (unsigned int fd = 0; fd < 10u && fd < nfds; ++fd) {
+            if (bash_fdset_test(requested_read, fd) &&
+                (fd == 0u || fd == 3u) && input_ready) {
+                bash_fdset_set(result_read, fd);
+                ready_fd[fd] = true;
+            }
+            if (bash_fdset_test(requested_write, fd) && fd_is_tty((int)fd)) {
+                bash_fdset_set(result_write, fd);
+                ready_fd[fd] = true;
+            }
+        }
+
+        int64_t ready = 0;
+        for (unsigned int fd = 0; fd < 10u && fd < nfds; ++fd)
+            if (ready_fd[fd]) ++ready;
+
+        if (ready != 0 || finite_timeout) {
+            if (read_address != 0 &&
+                !user_copy_out(read_address, result_read, sizeof(result_read)))
+                return -LINUX_EFAULT;
+            if (write_address != 0 &&
+                !user_copy_out(write_address, result_write, sizeof(result_write)))
+                return -LINUX_EFAULT;
+            if (except_address != 0 &&
+                !user_copy_out(except_address, result_except, sizeof(result_except)))
+                return -LINUX_EFAULT;
+            return ready;
+        }
+
+        bool wants_input = false;
+        if (nfds > 0 && bash_fdset_test(requested_read, 0)) wants_input = true;
+        if (nfds > 3 && bash_fdset_test(requested_read, 3)) wants_input = true;
+        if (!wants_input) {
+            if (read_address != 0)
+                (void)user_copy_out(read_address, result_read, sizeof(result_read));
+            if (write_address != 0)
+                (void)user_copy_out(write_address, result_write, sizeof(result_write));
+            if (except_address != 0)
+                (void)user_copy_out(except_address, result_except, sizeof(result_except));
+            return 0;
+        }
+        tty_wait_for_input();
+    }
+}
+
+'''
+    text = require_replace(text,
+                           'static int64_t shell_dispatch(uint64_t number,\n',
+                           select_helpers + 'static int64_t shell_dispatch(uint64_t number,\n')
+
+    old_select = '''    case SYS_SELECT:
+    case SYS_PSELECT6:
+        /* BusyBox's line editor can use poll/read on this terminal. Returning
+         * ENOSYS here lets libc fall back rather than fabricating fd_sets. */
+        return -LINUX_ENOSYS;
+'''
+    new_select = '''    case SYS_SELECT:
+        return bash_select_tty(a1, a2, a3, a4, a5);
+    case SYS_PSELECT6:
+        /* pselect6's sixth argument describes a temporary signal mask. Signal
+         * delivery is not implemented yet, so the fd readiness semantics are
+         * identical to select for this single foreground process. */
+        return bash_select_tty(a1, a2, a3, a4, a5);
+'''
+    text = require_replace(text, old_select, new_select)
 
     # Trace the true process-exit boundary. If a later run prints this before a
     # crash, the fault is in Twilight's unwind path; if it never prints, Bash
