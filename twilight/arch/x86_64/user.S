@@ -61,10 +61,16 @@ user_mode_enter:
     iretq
 .size user_mode_enter, .-user_mode_enter
 
-/* Interactive processes need hardware input while running at CPL3. This entry
- * is identical to user_mode_enter except its initial userspace RFLAGS has IF
- * set. SYSCALL saves that flag in R11; FMASK clears IF only while the kernel is
- * servicing the syscall and SYSRETQ restores the userspace value. */
+/* Interactive Linux processes need hardware input while running at CPL3. This
+ * entry is identical to user_mode_enter except its initial userspace RFLAGS has
+ * IF set and it honors the Linux x86_64 process-entry register contract.
+ *
+ * In particular, %rdx is special at ELF process entry: a dynamic loader may
+ * place an rtld_fini callback there for libc to register with atexit(). When a
+ * static ET_EXEC is entered directly by the kernel there is no runtime linker,
+ * so %rdx must be zero. Do not leak Twilight's CR3 physical address into that
+ * ABI slot; glibc will otherwise call the page-table address as a function when
+ * exit() runs. */
 .global user_mode_enter_interruptible
 .type user_mode_enter_interruptible, @function
 user_mode_enter_interruptible:
@@ -97,6 +103,9 @@ user_mode_enter_interruptible:
     pushq $0x202
     pushq $0x23
     pushq %r8
+
+    /* Static Linux ELF entry: no dynamic loader => no rtld_fini callback. */
+    xorl %edx, %edx
     iretq
 .size user_mode_enter_interruptible, .-user_mode_enter_interruptible
 
