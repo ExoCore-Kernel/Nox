@@ -7,6 +7,7 @@ ISO="$BUILD_DIR/nox.iso"
 LOG_DIR="${LOG_DIR:-build/hardware-matrix-logs}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-60}"
 POLL_INTERVAL="${POLL_INTERVAL:-1}"
+BASELINE_BINDINGS="$LOG_DIR/baseline.bindings"
 
 if ! command -v "$QEMU_BIN" >/dev/null 2>&1; then
     echo "error: missing $QEMU_BIN" >&2
@@ -42,7 +43,6 @@ device_available() {
 stop_qemu() {
     pid="$1"
     kill -TERM "$pid" 2>/dev/null || true
-    # Give QEMU a moment to close its serial backend cleanly.
     waited=0
     while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 3 ]; do
         sleep 1
@@ -52,6 +52,57 @@ stop_qemu() {
         kill -KILL "$pid" 2>/dev/null || true
     fi
     wait "$pid" 2>/dev/null || true
+}
+
+normalize_bindings() {
+    log="$1"
+    # Drop the BDF and IRQ because adding a QEMU device may renumber them. Keep
+    # vendor/device ID, class and bound-driver identity. Duplicate lines remain
+    # duplicated, so adding a second identical device is still detected by comm.
+    grep 'PCI BIND ' "$log" 2>/dev/null | \
+        sed -E 's/^.*PCI BIND [^ ]+ //' | \
+        sed -E 's/ irq=[0-9]+ / /' | \
+        sort || true
+}
+
+report_driver_delta() {
+    name="$1"
+    log="$2"
+    current="$LOG_DIR/$name.bindings"
+    added="$LOG_DIR/$name.added-bindings"
+
+    normalize_bindings "$log" >"$current"
+
+    if [ "$name" = "baseline" ]; then
+        cp "$current" "$BASELINE_BINDINGS"
+        echo "DRIVER STATUS: baseline inventory captured"
+        return 0
+    fi
+
+    if [ ! -f "$BASELINE_BINDINGS" ]; then
+        echo "DRIVER STATUS: UNKNOWN (baseline binding inventory unavailable)"
+        return 0
+    fi
+
+    comm -13 "$BASELINE_BINDINGS" "$current" >"$added" || true
+
+    if [ ! -s "$added" ]; then
+        echo "DRIVER STATUS: DEVICE NOT OBSERVED IN PCI DELTA"
+        return 0
+    fi
+
+    echo "Added PCI function(s):"
+    sed 's/^/  /' "$added"
+
+    if grep -q 'driver=NONE$' "$added"; then
+        if grep -v -q 'driver=NONE$' "$added"; then
+            echo "DRIVER STATUS: PARTIAL (at least one added PCI function bound, at least one unbound)"
+        else
+            echo "DRIVER STATUS: DETECTED / NO DRIVER BOUND"
+        fi
+    else
+        echo "DRIVER STATUS: DRIVER BOUND"
+    fi
 }
 
 run_case() {
@@ -67,9 +118,6 @@ run_case() {
     : >"$log"
     : >"$qemu_log"
 
-    # Keep the guest serial stream in its own file. This avoids making QEMU's
-    # stdio backend depend on whether the matrix itself was launched from an
-    # interactive terminal, SSH session, CI job, or redirected shell.
     "$QEMU_BIN" \
         -M q35 \
         -cpu qemu64 \
@@ -94,9 +142,6 @@ run_case() {
             break
         fi
 
-        # The serial trace is emitted immediately before the IRET into Bash and
-        # is a reliable boot-completion marker even if a terminal prompt lacks
-        # a trailing newline. Prefer the actual prompt when it is present.
         if grep -q 'nox#' "$log" 2>/dev/null || \
            grep -q '\[serial\] bash-shell: entering GNU Bash /bin/bash -i at CPL3' "$log" 2>/dev/null; then
             outcome="pass"
@@ -117,12 +162,13 @@ run_case() {
     case "$outcome" in
         pass)
             echo "RESULT: BOOT PASS (GNU Bash userspace reached after ~${elapsed}s)"
-            grep -E 'IOAPIC|Local APIC|PCI|driver|Ethernet|AHCI|NVMe|virtio|USB|HDA|bash-shell|nox#' "$log" | tail -n 60 || true
+            report_driver_delta "$name" "$log"
+            grep -E 'PCI BIND|IOAPIC|Local APIC|driver|Ethernet|AHCI|NVMe|virtio|USB|HDA|bash-shell|nox#' "$log" | tail -n 80 || true
             return 0
             ;;
         fail)
             echo "RESULT: BOOT FAIL (kernel panic/fatal after ~${elapsed}s)"
-            grep -E '\[panic\]|\[serial\] FATAL:|unsupported syscall|IOAPIC|APIC|PCI|driver' "$log" | tail -n 60 || true
+            grep -E '\[panic\]|\[serial\] FATAL:|unsupported syscall|IOAPIC|APIC|PCI|driver' "$log" | tail -n 80 || true
             return 1
             ;;
         exited)
