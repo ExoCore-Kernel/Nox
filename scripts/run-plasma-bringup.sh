@@ -95,6 +95,13 @@ else
     esac
 fi
 
+# xf86-video-fbdev expects the common RGB888 framebuffer as X depth 24 even
+# when the hardware framebuffer itself is 32 bpp. Patch the cached or freshly
+# built CPIO in place; the replacement is equal-length and preserves CPIO layout.
+if [ "$ROOTFS_KIND" = "plasma-x11" ]; then
+    "$PYTHON" scripts/fix-plasma-fbdev-depth.py "$ROOTFS"
+fi
+
 rm -rf "$ISO_ROOT"
 mkdir -p "$ISO_ROOT/boot/limine" "$ISO_ROOT/EFI/BOOT"
 cp "$BUILD_DIR/twilight.elf" "$ISO_ROOT/boot/twilight.elf"
