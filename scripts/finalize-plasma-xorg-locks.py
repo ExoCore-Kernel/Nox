@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add the small writable-VFS syscalls Xorg uses to claim display :0.
+"""Add the small writable-VFS and credential syscalls Xorg needs for bring-up.
 
 Xorg creates a temporary file in /tmp, adjusts its mode, then link(2)s it to
 /tmp/.X0-lock as an atomic claim.  Twilight's bring-up VFS stores file payloads
@@ -7,6 +7,12 @@ inline rather than as shared inode objects, so link() duplicates the runtime
 node's metadata/data under the destination name.  Xorg immediately unlinks the
 temporary source after a successful claim, making that equivalent for this
 bring-up path while keeping the implementation simple.
+
+The XKB helper launch path also drops/restores credentials before execing
+xkbcomp.  Bring-up userspace currently has a single root credential model, so
+the Linux set*id calls are accepted as successful no-ops.  This is deliberately
+limited to the Plasma compatibility layer; a real credential model can replace
+it later without affecting the native Twilight kernel API.
 """
 from __future__ import annotations
 
@@ -34,6 +40,26 @@ def main() -> int:
         "#define SYS_CHDIR           80ull\n"
         "#define SYS_LINK            86ull\n"
         "#define SYS_FCHMOD          91ull\n",
+    )
+    text = rep(
+        text,
+        "#define SYS_GETGID         104ull\n",
+        "#define SYS_GETGID         104ull\n"
+        "#define SYS_SETUID         105ull\n"
+        "#define SYS_SETGID         106ull\n",
+    )
+    text = rep(
+        text,
+        "#define SYS_SETSID         112ull\n#define SYS_GETGROUPS      115ull\n#define SYS_GETRESUID      118ull\n#define SYS_GETRESGID      120ull\n",
+        "#define SYS_SETSID         112ull\n"
+        "#define SYS_SETREUID       113ull\n"
+        "#define SYS_SETREGID       114ull\n"
+        "#define SYS_GETGROUPS      115ull\n"
+        "#define SYS_SETGROUPS      116ull\n"
+        "#define SYS_SETRESUID      117ull\n"
+        "#define SYS_GETRESUID      118ull\n"
+        "#define SYS_SETRESGID      119ull\n"
+        "#define SYS_GETRESGID      120ull\n",
     )
     text = rep(
         text,
@@ -103,7 +129,29 @@ static int64_t plasma_runtime_link(uint64_t old_address, uint64_t new_address) {
 '''
     text = rep(text, dispatch_anchor, dispatch + dispatch_anchor)
 
-    # Bash/musl probes these while establishing credentials.  Twilight's
+    # Xorg's helper-launch path normalizes uid/gid before execing xkbcomp.
+    # Twilight's Plasma ABI is root-only during bring-up, so accepting the
+    # credential setters is equivalent to Linux set*id(0) for this environment.
+    # Include the related variants now so libc cannot fall through to the next
+    # unsupported setxid syscall after setgid(2) succeeds.
+    credential_anchor = (
+        "    case SYS_GETUID:\n"
+        "    case SYS_GETGID:\n"
+        "    case SYS_GETEUID:\n"
+        "    case SYS_GETEGID: return 0;\n"
+    )
+    credential_dispatch = credential_anchor + (
+        "    case SYS_SETUID:\n"
+        "    case SYS_SETGID:\n"
+        "    case SYS_SETREUID:\n"
+        "    case SYS_SETREGID:\n"
+        "    case SYS_SETGROUPS:\n"
+        "    case SYS_SETRESUID:\n"
+        "    case SYS_SETRESGID: return 0;\n"
+    )
+    text = rep(text, credential_anchor, credential_dispatch)
+
+    # Bash/musl probes these while establishing credentials. Twilight's
     # bring-up userspace runs as uid/gid 0, so Linux semantics are simply to
     # return the previous fsuid/fsgid, also 0.
     text = rep(
@@ -115,7 +163,7 @@ static int64_t plasma_runtime_link(uint64_t old_address, uint64_t new_address) {
     )
 
     path.write_text(text, encoding="utf-8")
-    print(f"Finalized Xorg /tmp lock link+fchmod ABI: {path}")
+    print(f"Finalized Xorg /tmp lock + root credential ABI: {path}")
     return 0
 
 
