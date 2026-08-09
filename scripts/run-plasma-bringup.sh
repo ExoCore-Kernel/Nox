@@ -22,9 +22,9 @@ make BUILD_DIR="$BUILD_DIR" \
     BASH_SHELL=1 \
     twilight limine
 
-# The GUI bring-up ABI is generated only for this build.  It layers real CPIO
-# files/directories, file-backed mmap, writable runtime IPC, fbdev, dynamic ELF,
-# and cooperative multi-process scheduling over the already-proven Bash ABI.
+# GUI-only generated Linux ABI: read-only Alpine CPIO + getdents, writable
+# /tmp and /run, pipes/AF_UNIX, direct fbdev mmap, dynamic ELF/musl, and
+# cooperative multi-process scheduling. Normal Nox builds remain unchanged.
 BASH_COMPAT_C="$BUILD_DIR/generated/linux/bash-shell-compat.c"
 BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 "$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
@@ -38,6 +38,7 @@ BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 "$PYTHON" scripts/add-plasma-processes.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-scheduler.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-runtime.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/finalize-plasma-low-fds.py "$BASH_COMPAT_C"
 rm -f "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
@@ -91,15 +92,17 @@ echo "Expected early proof:"
 echo "  [linux] Plasma rootfs mounted from Limine module: ..."
 echo "  [linux] Plasma ELF gate PASS: loader=..."
 if [ "$ROOTFS_KIND" = "plasma-x11" ]; then
-    echo "GUI stack included: Alpine 3.21.7, Plasma 6.2, Xorg, fbdev, D-Bus"
+    echo "GUI stack included: Alpine 3.21.7, Plasma 6.2, Xorg fbdev, D-Bus"
     echo "At nox#, enter the real Alpine shell:"
     echo "  exec /bin/busybox sh -i"
     echo "Then run:"
-    echo "  ls /usr/bin | head"
+    echo "  ls /usr/bin"
     echo "  /usr/bin/Xorg -version"
     echo "  /usr/bin/Xorg :0 -retro -nolisten tcp -novtswitch -sharevts -logfile /dev/null"
     echo "Expected framebuffer proof when Xorg maps video memory:"
     echo "  [linux:fbdev] mapped /dev/fb0 into userspace"
+    echo "After Xorg itself runs, the actual Plasma session target is:"
+    echo "  DISPLAY=:0 XDG_RUNTIME_DIR=/tmp/runtime-root dbus-run-session startplasma-x11"
     echo "Use 'gui' mode so the QEMU display is visible."
 fi
 echo ""
