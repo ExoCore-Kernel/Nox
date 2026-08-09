@@ -17,6 +17,10 @@ bool rootfs_init(const void *archive, size_t size);
 bool rootfs_available(void);
 size_t rootfs_entry_count(void);
 
+/* Return the Nth non-trailer archive entry. This is primarily used by the Linux
+ * getdents64 compatibility path to enumerate the read-only initramfs. */
+bool rootfs_entry_at(size_t index, struct rootfs_node *out);
+
 /* Paths may be absolute (/usr/bin/foo) or archive-style (usr/bin/foo). */
 bool rootfs_lookup(const char *path, struct rootfs_node *out);
 
