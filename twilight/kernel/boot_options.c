@@ -1,24 +1,17 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 
-#include <limine.h>
+#include <twilight/boot_options.h>
 
 /*
- * Keep the graphical boot policy independent from entry.c's branding parser.
- * Limine fills request objects found in .limine_requests before kmain runs, so
- * the Linux userspace bring-up code can query the executable command line later
- * without coupling the generated ABI shim to entry.c internals.
+ * entry.c owns Twilight's single LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID request.
+ * Limine rejects duplicate requests with the same ID, so boot policy consumes
+ * the command line passed in by entry.c instead of declaring another request.
  *
  * The normal Plasma image has no shell flag and therefore boots graphically.
- * Adding `nox.shell=1` to the Limine cmdline requests the interactive shell.
+ * Adding `nox.shell=1` (or `boot=shell`) requests the interactive shell.
  */
-__attribute__((used, section(".limine_requests")))
-static volatile struct limine_executable_cmdline_request boot_options_cmdline_request = {
-    .id = LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID,
-    .revision = 0,
-    .response = 0,
-};
+static bool boot_shell_requested;
 
 static bool token_equal(const char *start, size_t length, const char *expected) {
     if (start == 0 || expected == 0) return false;
@@ -30,12 +23,11 @@ static bool token_equal(const char *start, size_t length, const char *expected) 
     return i == length && expected[i] == '\0';
 }
 
-bool twilight_boot_shell_requested(void) {
-    if (boot_options_cmdline_request.response == 0 ||
-        boot_options_cmdline_request.response->cmdline == 0)
-        return false;
+void twilight_boot_options_init(const char *cmdline) {
+    boot_shell_requested = false;
+    if (cmdline == 0) return;
 
-    const char *cursor = boot_options_cmdline_request.response->cmdline;
+    const char *cursor = cmdline;
     while (*cursor != '\0') {
         while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n')
             ++cursor;
@@ -48,9 +40,13 @@ bool twilight_boot_shell_requested(void) {
         const size_t length = (size_t)(cursor - start);
 
         if (token_equal(start, length, "nox.shell=1") ||
-            token_equal(start, length, "boot=shell"))
-            return true;
+            token_equal(start, length, "boot=shell")) {
+            boot_shell_requested = true;
+            return;
+        }
     }
+}
 
-    return false;
+bool twilight_boot_shell_requested(void) {
+    return boot_shell_requested;
 }
