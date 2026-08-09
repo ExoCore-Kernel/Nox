@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Add a bounded syscall trace for the real Xorg process during bring-up.
+"""Add a bounded post-loader syscall trace for the real Xorg process.
 
-This is diagnostic-only. It traces the first 256 syscall entries once the
-current cooperative process execs /usr/libexec/Xorg, including a few useful
-pathname/descriptor details. The trace is intentionally bounded so a polling
-loop cannot flood serial forever on slow TCG hosts.
+This is diagnostic-only. The dynamic linker burns through hundreds of syscalls
+before Xorg reaches the configuration/driver path we actually care about, so
+stay silent until Xorg performs its AF_NETLINK udev probe. That probe happens
+immediately before the Xorg banner on this bring-up path. From that point, trace
+the next 256 syscall entries, including useful pathname/descriptor details.
+The bound prevents a polling loop from flooding serial forever on slow TCG
+hosts.
 """
 from __future__ import annotations
 
@@ -33,7 +36,8 @@ def main() -> int:
         "                              uint64_t a4, uint64_t a5, uint64_t a6) {\n"
     )
 
-    helper = r'''static uint32_t plasma_xorg_syscall_trace_count;
+    helper = r'''static bool plasma_xorg_syscall_trace_armed;
+static uint32_t plasma_xorg_syscall_trace_count;
 
 static void plasma_xorg_trace_path(const char *label, uint64_t address) {
     char path[192];
@@ -51,6 +55,18 @@ static void plasma_xorg_trace_syscall(uint64_t number,
     (void)a6;
     struct plasma_process *process = plasma_current_process();
     if (process == 0 || !string_equal(process->exec_path, "/usr/libexec/Xorg")) return;
+
+    /* Xorg/libudev performs socket(AF_NETLINK=16, ..., NETLINK_KOBJECT_UEVENT=15)
+     * immediately before the banner on this bring-up path. Arm here so the
+     * limited trace budget is spent on config/driver initialization rather than
+     * musl's DSO loader. Include the netlink call itself as trace #0. */
+    if (!plasma_xorg_syscall_trace_armed) {
+        if (number != SYS_SOCKET || a1 != 16u) return;
+        plasma_xorg_syscall_trace_armed = true;
+        plasma_xorg_syscall_trace_count = 0;
+        serial_write("[linux:xorg-syscall] trace armed after AF_NETLINK udev probe\n");
+    }
+
     if (plasma_xorg_syscall_trace_count >= 256u) return;
 
     serial_write("[linux:xorg-syscall] #");
@@ -111,7 +127,7 @@ static void plasma_xorg_trace_syscall(uint64_t number,
     )
 
     path.write_text(text, encoding="utf-8")
-    print(f"Added bounded Xorg syscall trace: {path}")
+    print(f"Added post-udev bounded Xorg syscall trace: {path}")
     return 0
 
 
