@@ -109,6 +109,26 @@ user_mode_enter_interruptible:
     iretq
 .size user_mode_enter_interruptible, .-user_mode_enter_interruptible
 
+/*
+ * execve() does not return to the old userspace image.  The syscall router can
+ * call this while running on the shared kernel transition stack after it has
+ * replaced the process mappings and built the new initial stack.  The ordinary
+ * SYSRET path then resumes at the replacement ELF entry point.
+ */
+.global linux_exec_set_return_state
+.type linux_exec_set_return_state, @function
+linux_exec_set_return_state:
+    movq %rdi, linux_saved_user_rip(%rip)
+    movq %rsi, linux_saved_user_rsp(%rip)
+    movq $0, linux_saved_arg1(%rip)
+    movq $0, linux_saved_arg2(%rip)
+    movq $0, linux_saved_arg3(%rip)
+    movq $0, linux_saved_arg4(%rip)
+    movq $0, linux_saved_arg5(%rip)
+    movq $0, linux_saved_arg6(%rip)
+    ret
+.size linux_exec_set_return_state, .-linux_exec_set_return_state
+
 .global int80_stub
 .type int80_stub, @function
 int80_stub:
