@@ -31,8 +31,7 @@ PLASMA_PACKAGES = [
     "plasma-workspace-x11",
     "xorg-server",
     "xf86-video-fbdev",
-    "xf86-input-mouse",
-    "xf86-input-keyboard",
+    "xf86-input-libinput",
     "xinit",
     "dbus",
 ]
@@ -219,6 +218,8 @@ def write_nox_configuration(root: pathlib.Path) -> None:
         '''EndSection\n\n'''
         '''Section "ServerFlags"\n'''
         '''    Option "AutoAddDevices" "false"\n'''
+        '''    Option "AutoEnableDevices" "false"\n'''
+        '''    Option "AllowEmptyInput" "true"\n'''
         '''    Option "AutoAddGPU" "false"\n'''
         '''    Option "AutoBindGPU" "false"\n'''
         '''EndSection\n''',
