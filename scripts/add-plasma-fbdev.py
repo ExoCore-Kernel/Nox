@@ -36,9 +36,13 @@ def main() -> int:
         "#define LINUX_EEXIST     17\n",
         "#define LINUX_EEXIST     17\n#define LINUX_ENODEV     19\n",
     )
+    text = replace_once(
+        text,
+        "#define MAP_ANONYMOUS 0x20ull\n",
+        "#define MAP_ANONYMOUS 0x20ull\n#define PLASMA_FB_FD 5\n",
+    )
 
     fb_defs = r'''
-#define PLASMA_FB_FD 5
 #define FBIOGET_VSCREENINFO 0x4600ull
 #define FBIOPUT_VSCREENINFO 0x4601ull
 #define FBIOGET_FSCREENINFO 0x4602ull
@@ -152,7 +156,6 @@ static int64_t plasma_fb_ioctl(uint64_t request, uint64_t argument) {
 
 static int64_t plasma_fb_mmap(uint64_t address, uint64_t length,
                               uint64_t prot, uint64_t flags, uint64_t offset) {
-    (void)flags;
     if (offset != 0 || length == 0) return -LINUX_EINVAL;
     const uint64_t physical = framebuffer_physical_address();
     const uint64_t fb_size = framebuffer_size();
@@ -195,6 +198,20 @@ static int64_t plasma_fb_mmap(uint64_t address, uint64_t length,
 }
 
 '''
+
+    # sys_mmap appears before sys_ioctl, where the full fbdev helpers are
+    # injected. Give it a forward declaration before adding the dispatch hook.
+    mmap_anchor = "static int64_t sys_mmap(uint64_t address, uint64_t length, uint64_t prot,\n                        uint64_t flags, uint64_t fd, uint64_t offset) {\n"
+    text = replace_once(
+        text,
+        mmap_anchor,
+        "static int64_t plasma_fb_mmap(uint64_t address, uint64_t length,\n"
+        "                              uint64_t prot, uint64_t flags, uint64_t offset);\n\n"
+        + mmap_anchor
+        + "    if ((int)fd == PLASMA_FB_FD && (flags & MAP_ANONYMOUS) == 0)\n"
+        + "        return plasma_fb_mmap(address, length, prot, flags, offset);\n",
+    )
+
     text = replace_once(
         text,
         "static int64_t sys_ioctl(uint64_t fd_value, uint64_t request, uint64_t argument) {\n",
@@ -246,16 +263,6 @@ static int64_t plasma_fb_mmap(uint64_t address, uint64_t length,
         "        return fill_stat(a2, S_IFCHR | 0666u);\n",
     )
 
-    mmap_anchor = "static int64_t sys_mmap(uint64_t address, uint64_t length, uint64_t prot,\n                        uint64_t flags, uint64_t fd, uint64_t offset) {\n"
-    text = replace_once(
-        text,
-        mmap_anchor,
-        mmap_anchor
-        + "    if ((int)fd == PLASMA_FB_FD && (flags & MAP_ANONYMOUS) == 0)\n"
-        + "        return plasma_fb_mmap(address, length, prot, flags, offset);\n",
-    )
-
-    # fcntl is used by Xorg to inspect the framebuffer descriptor.
     text = replace_once(
         text,
         "static int64_t sys_fcntl(int fd, uint64_t command, uint64_t argument) {\n"
