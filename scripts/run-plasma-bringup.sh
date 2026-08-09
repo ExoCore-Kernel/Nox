@@ -70,7 +70,7 @@ case "$ROOTFS_KIND" in
         echo "Plasma rootfs mode: Alpine 3.21.7 + Plasma 6.2 + Xorg fbdev"
         if [ "$(uname -s)" = "Darwin" ]; then
             echo "macOS rootfs backend: native apko (no Docker daemon required)"
-            "$PYTHON" scripts/fetch-alpine-plasma-x11-apko.py "$ROOTFS"
+            "$PYTHON" scripts/run-plasma-apko-macos.py "$ROOTFS"
         else
             "$PYTHON" scripts/fetch-alpine-plasma-x11.py "$ROOTFS"
         fi
