@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """Boot the Plasma bring-up image graphically unless Limine requests a shell.
 
-The generated compatibility process is GNU Bash.  Keep it interactive so the
+The generated compatibility process is GNU Bash. Keep it interactive so the
 existing shell/debug path remains unchanged, but add a one-shot PROMPT_COMMAND
-in the default boot mode.  Bash runs that command before its first prompt; it
-launches xinit, which in turn starts the already-proven Xorg fbdev command and
-then /root/.xinitrc (D-Bus + startplasma-x11).
+in the default boot mode. Bash runs that command before its first prompt.
+
+Do not use xinit here. During bring-up xinit creates an early synchronization
+pipe and can put both the shell parent and xinit child to sleep before either
+Xorg or the Plasma client has exec'd, leaving the cooperative scheduler with no
+runnable process. Instead reproduce the already-proven manual sequence exactly:
+start Xorg in the background, set DISPLAY/runtime environment, then exec
+`dbus-run-session startplasma-x11` in the original shell process.
 
 Passing `nox.shell=1` (or the compatibility alias `boot=shell`) on Limine's
 kernel command line suppresses PROMPT_COMMAND and leaves the normal nox# shell.
-If xinit/Plasma exits, PROMPT_COMMAND has already unset itself, so Bash falls
-back to an ordinary debug prompt instead of relaunching the GUI forever.
+If Plasma exits, PROMPT_COMMAND has already unset itself, so Bash will not
+relaunch the GUI forever.
 """
 from __future__ import annotations
 
@@ -43,9 +48,10 @@ def main() -> int:
     env_block = r'''    const char env3[] = "PS1=nox# ";
     const char env4_auto[] =
         "PROMPT_COMMAND=unset PROMPT_COMMAND; export HOME=/tmp/runtime-root; "
-        "/usr/bin/xinit /bin/sh /root/.xinitrc -- /usr/bin/Xorg :0 "
-        "-retro -extension GLX -nolisten tcp -novtswitch -sharevts "
-        "-logfile /dev/null";
+        "/usr/bin/Xorg :0 -retro -extension GLX -nolisten tcp -novtswitch "
+        "-sharevts -logfile /dev/null & export DISPLAY=:0; "
+        "export XDG_RUNTIME_DIR=/tmp/runtime-root; export KWIN_COMPOSE=N; "
+        "exec /usr/bin/dbus-run-session /usr/bin/startplasma-x11";
     const char env4_shell[] = "PROMPT_COMMAND=";
     const char *env4 = twilight_boot_shell_requested() ? env4_shell : env4_auto;
 '''
@@ -90,7 +96,7 @@ def main() -> int:
         "    if (twilight_boot_shell_requested())\n"
         "        trace(\"boot mode: interactive shell requested by Limine (nox.shell=1)\");\n"
         "    else\n"
-        "        trace(\"boot mode: automatic Xorg + Plasma via xinit\");\n"
+        "        trace(\"boot mode: automatic Xorg background + Plasma session\");\n"
     )
     text = rep(text, trace_anchor, trace_block)
 
