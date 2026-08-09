@@ -33,7 +33,6 @@ const char *twilight_os_name_from_cmdline(const char *cmdline) {
 
 void twilight_print_version_banner(const char *os_name) {
     const char *line1[] = {
-        "Twilight ",
         os_name ? os_name : "Unknown",
         " ",
         TWILIGHT_VERSION,
