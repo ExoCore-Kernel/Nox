@@ -96,17 +96,33 @@ def main() -> int:
 '''
     text=rep(text,old,new)
 
-    # Increase resident-page and process metadata ceilings for Qt/KDE binaries.
-    # expand-plasma-page-budget.py runs earlier and currently raises the source
-    # value from 768 to 8192 pages. Match the definition structurally so this
-    # finalizer remains valid if that earlier budget changes again.
+    # Qt/KDE's dynamic dependency closure is much larger than the early Xorg/
+    # D-Bus tests.  16,384 pages capped a process at 64 MiB of tracked mappings,
+    # which can make musl fail later DT_NEEDED mappings and then report a cascade
+    # of unresolved relocation symbols.  Give each Plasma process 256 MiB of
+    # tracked user pages for bring-up.  This is metadata capacity; physical RAM
+    # is still allocated only for pages that are actually mapped.
     page_pattern = r"(?m)^#define SHELL_MAX_PAGES\s+\d+u$"
     if len(re.findall(page_pattern, text)) != 1:
         raise RuntimeError("expected exactly one SHELL_MAX_PAGES definition")
-    text = re.sub(page_pattern, "#define SHELL_MAX_PAGES     16384u", text, count=1)
+    text = re.sub(page_pattern, "#define SHELL_MAX_PAGES     65536u", text, count=1)
+
+    # Do not let another page-budget exhaustion look like mysterious linker
+    # breakage.  Emit one explicit diagnostic from the common page allocator.
+    text=rep(text,
+        "    if (image.page_count >= SHELL_MAX_PAGES) return 0;\n",
+        "    if (image.page_count >= SHELL_MAX_PAGES) {\n"
+        "        serial_write(\"[linux:vm] SHELL_MAX_PAGES exhausted: pages=\");\n"
+        "        serial_u64((uint64_t)image.page_count);\n"
+        "        serial_write(\" limit=\");\n"
+        "        serial_u64((uint64_t)SHELL_MAX_PAGES);\n"
+        "        serial_write(\"\\n\");\n"
+        "        return 0;\n"
+        "    }\n")
+
     text=rep(text,"#define PLASMA_MAX_PROCESSES 12u\n","#define PLASMA_MAX_PROCESSES 24u\n")
 
-    p.write_text(text,encoding="utf-8"); print(f"Finalized Plasma runtime IPC + per-process FDs: {p}"); return 0
+    p.write_text(text,encoding="utf-8"); print(f"Finalized Plasma runtime IPC + per-process FDs + 256 MiB page budget: {p}"); return 0
 if __name__=="__main__":
     try: raise SystemExit(main())
     except Exception as e: print(f"ERROR: {e}",file=sys.stderr); raise SystemExit(1)
