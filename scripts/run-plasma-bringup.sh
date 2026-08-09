@@ -38,6 +38,7 @@ make BUILD_DIR="$BUILD_DIR" \
 # and cooperative multi-process scheduling. Normal Nox builds remain unchanged.
 "$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-bash-compat.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/expand-plasma-page-budget.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-rootfs-stat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-getdents.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-file-mmap.py "$BASH_COMPAT_C"
@@ -127,7 +128,8 @@ if [ "$ROOTFS_KIND" = "plasma-x11" ]; then
     echo "Then run:"
     echo "  ls /usr/bin"
     echo "  /usr/bin/Xorg -version"
-    echo "  /usr/bin/Xorg :0 -retro -nolisten tcp -novtswitch -sharevts -logfile /dev/null"
+    echo "  /usr/bin/Xorg :0 -retro -extension GLX -nolisten tcp -novtswitch -sharevts -logfile /dev/null"
+    echo "GLX is disabled during framebuffer bring-up so Mesa/LLVM cannot consume the tiny early userspace mapping budget."
     echo "Expected framebuffer proof when Xorg maps video memory:"
     echo "  [linux:fbdev] mapped /dev/fb0 into userspace"
     echo "After Xorg itself runs, the actual Plasma session target is:"
