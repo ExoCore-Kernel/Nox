@@ -14,12 +14,17 @@
  * zero-copy metadata index so rootfs_entry_at()/lookup() do not re-parse a
  * 1.7+ GiB CPIO archive for every directory entry or shared-library open. */
 #define ROOTFS_MAX_ENTRIES    131072u
+#define ROOTFS_HASH_SLOTS     262144u
+#define ROOTFS_HASH_MASK      (ROOTFS_HASH_SLOTS - 1u)
 
 static const uint8_t *rootfs_archive;
 static size_t rootfs_archive_size;
 static size_t rootfs_entries;
 static bool rootfs_ready;
 static struct rootfs_node rootfs_index[ROOTFS_MAX_ENTRIES];
+/* Each slot stores index+1; zero means empty. Power-of-two capacity keeps
+ * lookup cheap and the current Plasma image below 25% load factor. */
+static uint32_t rootfs_hash[ROOTFS_HASH_SLOTS];
 
 static size_t align4(size_t value) {
     return (value + 3u) & ~(size_t)3u;
@@ -76,6 +81,22 @@ static bool path_equal(const char *wanted, const char *entry) {
     return *wanted == '\0' && *entry == '\0';
 }
 
+static uint64_t path_hash(const char *path) {
+    path = canonical_path(path);
+    uint64_t hash = 1469598103934665603ull;
+    if (path == 0) return hash;
+    /* Canonical root '/' hashes exactly like the CPIO root entry '.'. */
+    if (*path == '\0') {
+        hash ^= (uint8_t)'.';
+        return hash * 1099511628211ull;
+    }
+    while (*path != '\0') {
+        hash ^= (uint8_t)*path++;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
 static bool string_equal(const char *a, const char *b) {
     if (a == 0 || b == 0) return false;
     while (*a != '\0' && *b != '\0') {
@@ -130,11 +151,29 @@ static bool parse_entry(size_t offset, struct parsed_entry *out) {
     return true;
 }
 
+static void rootfs_hash_clear(void) {
+    for (size_t i = 0; i < ROOTFS_HASH_SLOTS; ++i) rootfs_hash[i] = 0;
+}
+
+static bool rootfs_hash_insert(size_t index) {
+    if (index >= rootfs_entries || index >= UINT32_MAX) return false;
+    size_t slot = (size_t)path_hash(rootfs_index[index].name) & ROOTFS_HASH_MASK;
+    for (size_t probe = 0; probe < ROOTFS_HASH_SLOTS; ++probe) {
+        if (rootfs_hash[slot] == 0) {
+            rootfs_hash[slot] = (uint32_t)(index + 1u);
+            return true;
+        }
+        slot = (slot + 1u) & ROOTFS_HASH_MASK;
+    }
+    return false;
+}
+
 bool rootfs_init(const void *archive, size_t size) {
     rootfs_archive = 0;
     rootfs_archive_size = 0;
     rootfs_entries = 0;
     rootfs_ready = false;
+    rootfs_hash_clear();
 
     if (archive == 0 || size < CPIO_NEWC_HEADER_SIZE) return false;
     rootfs_archive = (const uint8_t *)archive;
@@ -175,6 +214,16 @@ bool rootfs_init(const void *archive, size_t size) {
         return false;
     }
 
+    for (size_t i = 0; i < rootfs_entries; ++i) {
+        if (!rootfs_hash_insert(i)) {
+            rootfs_archive = 0;
+            rootfs_archive_size = 0;
+            rootfs_entries = 0;
+            rootfs_hash_clear();
+            return false;
+        }
+    }
+
     rootfs_ready = true;
     return true;
 }
@@ -195,11 +244,16 @@ bool rootfs_entry_at(size_t index, struct rootfs_node *out) {
 
 bool rootfs_lookup(const char *path, struct rootfs_node *out) {
     if (!rootfs_ready || path == 0 || out == 0) return false;
-    for (size_t i = 0; i < rootfs_entries; ++i) {
-        if (path_equal(path, rootfs_index[i].name)) {
-            *out = rootfs_index[i];
+    size_t slot = (size_t)path_hash(path) & ROOTFS_HASH_MASK;
+    for (size_t probe = 0; probe < ROOTFS_HASH_SLOTS; ++probe) {
+        const uint32_t stored = rootfs_hash[slot];
+        if (stored == 0) return false;
+        const size_t index = (size_t)stored - 1u;
+        if (index < rootfs_entries && path_equal(path, rootfs_index[index].name)) {
+            *out = rootfs_index[index];
             return true;
         }
+        slot = (slot + 1u) & ROOTFS_HASH_MASK;
     }
     return false;
 }
@@ -309,7 +363,7 @@ size_t rootfs_read(const struct rootfs_node *node, size_t offset,
     size_t remaining = node->size - offset;
     if (size > remaining) size = remaining;
 
-    uint8_t *out = (uint8_t *)buffer;
+    uint8_t *out = buffer;
     const uint8_t *in = node->data + offset;
     for (size_t i = 0; i < size; ++i) out[i] = in[i];
     return size;
