@@ -13,7 +13,18 @@ def main() -> int:
         print(f"usage: {sys.argv[0]} GENERATED_BASH_C",file=sys.stderr); return 2
     p=pathlib.Path(sys.argv[1]); text=p.read_text(encoding="utf-8")
 
-    marker="#define PLASMA_RUNTIME_FD_FIRST 64\n"
+    # Do not hard-code the runtime FD base here.  Earlier bring-up transforms
+    # may deliberately move it (for example Xtrans needs early listener FDs in
+    # the traditional low range).  Locate the generated definition and insert
+    # declarations immediately before whatever value is currently selected.
+    marker=None
+    for line in text.splitlines(keepends=True):
+        if line.startswith("#define PLASMA_RUNTIME_FD_FIRST "):
+            marker=line
+            break
+    if marker is None:
+        raise RuntimeError("PLASMA_RUNTIME_FD_FIRST definition not found")
+
     decls=(
         "static size_t string_length(const char *text);\n"
         "static bool string_equal(const char *a, const char *b);\n"
