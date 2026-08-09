@@ -31,6 +31,8 @@ PLASMA_PACKAGES = [
     "plasma-workspace-x11",
     "xorg-server",
     "xf86-video-fbdev",
+    "xf86-input-mouse",
+    "xf86-input-keyboard",
     "xinit",
     "dbus",
 ]
@@ -90,14 +92,6 @@ def extract_rootfs(archive: pathlib.Path, destination: pathlib.Path) -> None:
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
     with tarfile.open(archive, "r:gz") as tf:
-        # Python 3.14 changed tarfile.extractall() to use the restrictive
-        # 'data' filter by default. Alpine minirootfs archives intentionally
-        # contain absolute symlinks such as /usr/bin/yes -> /bin/busybox, which
-        # that filter rejects with AbsoluteLinkError. The archive has already
-        # been SHA-256 verified against Alpine's release checksum above, so use
-        # the explicit fully_trusted policy for this known release archive.
-        # Older Python versions did not expose the filter= keyword and already
-        # behaved equivalently, so retain a compatibility fallback.
         try:
             tf.extractall(destination, filter="fully_trusted")
         except TypeError:
@@ -194,22 +188,39 @@ def install_plasma_packages(cache: pathlib.Path, work: pathlib.Path,
         run_native_apk(tool_root, target_root)
         return
 
-    # macOS cannot execute Alpine's Linux musl loader directly. A tiny
-    # container boundary is the most reliable cross-host way to run apk while
-    # still producing the exact same x86_64 target filesystem.
     run_container_apk(target_root)
 
 
 def write_nox_configuration(root: pathlib.Path) -> None:
     (root / "etc/X11/xorg.conf.d").mkdir(parents=True, exist_ok=True)
     (root / "etc/X11/xorg.conf.d/20-twilight-fbdev.conf").write_text(
+        '''Section "Module"\n'''
+        '''    Disable "glx"\n'''
+        '''    Load "fbdevhw"\n'''
+        '''    Load "shadow"\n'''
+        '''EndSection\n\n'''
         '''Section "Device"\n'''
         '''    Identifier "TwilightFramebuffer"\n'''
         '''    Driver "fbdev"\n'''
         '''    Option "fbdev" "/dev/fb0"\n'''
         '''EndSection\n\n'''
+        '''Section "Monitor"\n'''
+        '''    Identifier "TwilightMonitor"\n'''
+        '''EndSection\n\n'''
+        '''Section "Screen"\n'''
+        '''    Identifier "TwilightScreen"\n'''
+        '''    Device "TwilightFramebuffer"\n'''
+        '''    Monitor "TwilightMonitor"\n'''
+        '''    DefaultDepth 32\n'''
+        '''EndSection\n\n'''
+        '''Section "ServerLayout"\n'''
+        '''    Identifier "TwilightLayout"\n'''
+        '''    Screen 0 "TwilightScreen" 0 0\n'''
+        '''EndSection\n\n'''
         '''Section "ServerFlags"\n'''
         '''    Option "AutoAddDevices" "false"\n'''
+        '''    Option "AutoAddGPU" "false"\n'''
+        '''    Option "AutoBindGPU" "false"\n'''
         '''EndSection\n''',
         encoding="ascii",
     )
@@ -303,7 +314,6 @@ def main() -> int:
     cache = output.parent / "downloads"
     target_root = work / "root-x86_64"
 
-    # Check host capability before pulling the full Plasma package closure.
     if platform.system().lower() != "linux" and find_container_runtime() is None:
         raise RuntimeError(
             "This host cannot run Alpine apk natively. Install/start Docker Desktop or Podman, "
