@@ -26,12 +26,14 @@ make BUILD_DIR="$BUILD_DIR" \
 
 # Plasma bring-up extends only the generated Bash ABI unit for now. Normal
 # Bash/driver builds remain untouched. The transforms add read-only rootfs FDs,
-# then real single-process execve() for ET_DYN + PT_INTERP so Bash can replace
-# itself with Alpine/musl before fork/clone scheduling exists.
+# file-backed mmap() for musl/DSOs, then real single-process execve() for ET_DYN
+# + PT_INTERP so Bash can replace itself with Alpine/musl before fork/clone
+# scheduling exists.
 BASH_COMPAT_C="$BUILD_DIR/generated/linux/bash-shell-compat.c"
 BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 "$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-bash-compat.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/add-plasma-file-mmap.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-execve.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-execve.py "$BASH_COMPAT_C"
 rm -f "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
