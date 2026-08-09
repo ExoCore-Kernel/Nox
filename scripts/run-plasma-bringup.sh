@@ -5,7 +5,7 @@ BUILD_DIR="${BUILD_DIR:-build/plasma-bringup}"
 ISO_ROOT="$BUILD_DIR/iso_root"
 ISO="$BUILD_DIR/nox-plasma.iso"
 ROOTFS="$BUILD_DIR/plasma-rootfs.cpio"
-ROOTFS_KIND="${PLASMA_ROOTFS:-alpine}"
+ROOTFS_KIND="${PLASMA_ROOTFS:-plasma-x11}"
 PYTHON="${PYTHON:-python3}"
 LIMINE="${LIMINE:-limine}"
 QEMU="${QEMU:-qemu-system-x86_64}"
@@ -16,29 +16,26 @@ if ! command -v xorriso >/dev/null 2>&1; then
     exit 1
 fi
 
-# Keep the already-proven static Bash Linux ABI as our diagnostic console while
-# the real filesystem/dynamic-loader/process pieces needed by Plasma are added.
+# Keep the already-proven static Bash Linux ABI as a diagnostic console while
+# the real Alpine process is brought up. The Plasma-only generated ABI is then
+# extended with real rootfs files, file-backed mmap, fbdev, dynamic exec, and a
+# cooperative multi-process scheduler. Normal driver/Bash builds stay untouched.
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
     BUSYBOX_SELF_TEST=1 \
     BASH_SHELL=1 \
     twilight limine
 
-# Plasma bring-up extends only the generated Bash ABI unit for now. Normal
-# Bash/driver builds remain untouched. The transforms add the real CPIO files,
-# rootfs-backed mmap, ET_DYN/PT_INTERP execve, then the first process boundary:
-# serialized fork/clone/vfork with an independent child CR3 plus exit/wait4.
-# The serialized scheduler is intentionally only the first process milestone;
-# it unlocks ordinary fork->exec shell commands before concurrent tasks/threads.
 BASH_COMPAT_C="$BUILD_DIR/generated/linux/bash-shell-compat.c"
 BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 "$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-file-mmap.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/add-plasma-fbdev.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-execve.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-execve.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-processes.py "$BASH_COMPAT_C"
-"$PYTHON" scripts/finalize-plasma-processes.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/finalize-plasma-scheduler.py "$BASH_COMPAT_C"
 rm -f "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
@@ -52,11 +49,15 @@ case "$ROOTFS_KIND" in
         "$PYTHON" scripts/make-plasma-rootfs.py "$ROOTFS"
         ;;
     alpine)
-        echo "Plasma rootfs mode: real Alpine 3.24.1 x86_64 minirootfs"
+        echo "Plasma rootfs mode: Alpine 3.24.1 x86_64 diagnostic minirootfs"
         "$PYTHON" scripts/fetch-alpine-plasma-base.py "$ROOTFS"
         ;;
+    plasma-x11)
+        echo "Plasma rootfs mode: Alpine 3.21.7 + Plasma 6.2 + Xorg fbdev"
+        "$PYTHON" scripts/fetch-alpine-plasma-x11.py "$ROOTFS"
+        ;;
     *)
-        echo "error: PLASMA_ROOTFS must be 'tiny' or 'alpine'" >&2
+        echo "error: PLASMA_ROOTFS must be 'tiny', 'alpine', or 'plasma-x11'" >&2
         exit 2
         ;;
 esac
@@ -86,18 +87,21 @@ echo "Plasma bring-up ISO: $ISO"
 echo "Rootfs mode: $ROOTFS_KIND"
 echo "Expected early proof:"
 echo "  [linux] Plasma rootfs mounted from Limine module: ..."
-echo "  [linux] Plasma rootfs probe PASS: /etc/nox-release is readable ..."
-if [ "$ROOTFS_KIND" = "alpine" ]; then
-    echo "  [linux] Plasma ELF gate: /bin/busybox ..."
-    echo "  [linux] Plasma ELF gate: PT_INTERP=..."
-    echo "  [linux] Plasma ELF gate PASS: loader=..."
-    echo "After the nox# prompt, run: exec /bin/busybox sh -i"
-    echo "Then test processes with: /bin/busybox echo child-process-ok"
-    echo "Expected process proof: fork created child -> execve -> child exited -> wait4 reaped child"
+echo "  [linux] Plasma ELF gate PASS: loader=..."
+echo "  [linux:process] cooperative scheduler online; init pid=1"
+if [ "$ROOTFS_KIND" = "plasma-x11" ]; then
+    echo "Full GUI userspace is present. After entering Alpine with:"
+    echo "  exec /bin/busybox sh -i"
+    echo "first verify Xorg exists with:"
+    echo "  /usr/bin/Xorg -version"
+    echo "then attempt the framebuffer X server with:"
+    echo "  /usr/bin/Xorg :0 -retro -nolisten tcp -novtswitch -sharevts -logfile /dev/null"
+    echo "Run this script with 'gui' instead of 'headless' to see the QEMU framebuffer."
+else
+    echo "After the nox# prompt, enter Alpine with: exec /bin/busybox sh -i"
 fi
 echo ""
 
-# Plasma itself will need substantially more than 512 MiB. Supplying a second
-# -m option here intentionally overrides run-qemu.sh's conservative default.
-QEMU="$QEMU" QEMU_EXTRA_ARGS="-m 2048M ${QEMU_EXTRA_ARGS:-}" \
+# Plasma/Qt needs room for the larger initramfs and multiple address spaces.
+QEMU="$QEMU" QEMU_EXTRA_ARGS="-m 3072M ${QEMU_EXTRA_ARGS:-}" \
     sh scripts/run-qemu.sh "$MODE" pc "$ISO"
