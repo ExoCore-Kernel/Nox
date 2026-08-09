@@ -49,7 +49,9 @@ def main() -> int:
     )
 
     helper_anchor = "static int64_t plasma_runtime_lseek(int fd, int64_t offset, int whence) {\n"
-    helpers = r'''static int64_t plasma_runtime_fchmod(int fd, uint32_t mode) {
+    helpers = r'''static bool copy_user_string(uint64_t address, char *out, size_t capacity);
+
+static int64_t plasma_runtime_fchmod(int fd, uint32_t mode) {
     struct plasma_runtime_fd *entry = plasma_runtime_fd(fd);
     if (entry == 0) return -LINUX_EBADF;
     if (entry->type != PLASMA_RT_FILE && entry->type != PLASMA_RT_DIR)
