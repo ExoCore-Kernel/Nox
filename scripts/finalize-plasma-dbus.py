@@ -78,7 +78,9 @@ def main() -> int:
     )
 
     helper_anchor = "static bool copy_user_string(uint64_t address, char *out, size_t capacity);\n\n"
-    helpers = r'''static int plasma_inotify_next_watch = 1;
+    helpers = r'''static void serial_u64(uint64_t value);
+
+static int plasma_inotify_next_watch = 1;
 
 static int64_t plasma_runtime_chmod(uint64_t path_address, uint32_t mode) {
     char path[256];
