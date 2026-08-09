@@ -18,8 +18,9 @@ fi
 
 # Keep the already-proven static Bash Linux ABI as a diagnostic console while
 # the real Alpine process is brought up. The Plasma-only generated ABI is then
-# extended with real rootfs files, file-backed mmap, fbdev, dynamic exec, and a
-# cooperative multi-process scheduler. Normal driver/Bash builds stay untouched.
+# extended with real rootfs files, directory enumeration, file-backed mmap,
+# fbdev, dynamic exec, and a cooperative multi-process scheduler. Normal
+# driver/Bash builds stay untouched.
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
     BUSYBOX_SELF_TEST=1 \
@@ -30,6 +31,7 @@ BASH_COMPAT_C="$BUILD_DIR/generated/linux/bash-shell-compat.c"
 BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 "$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-bash-compat.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/add-plasma-getdents.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-file-mmap.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-fbdev.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-execve.py "$BASH_COMPAT_C"
@@ -92,7 +94,8 @@ echo "  [linux:process] cooperative scheduler online; init pid=1"
 if [ "$ROOTFS_KIND" = "plasma-x11" ]; then
     echo "Full GUI userspace is present. After entering Alpine with:"
     echo "  exec /bin/busybox sh -i"
-    echo "first verify Xorg exists with:"
+    echo "verify directory enumeration and Xorg with:"
+    echo "  ls /usr/bin | head"
     echo "  /usr/bin/Xorg -version"
     echo "then attempt the framebuffer X server with:"
     echo "  /usr/bin/Xorg :0 -retro -nolisten tcp -novtswitch -sharevts -logfile /dev/null"
