@@ -5,7 +5,7 @@ BUILD_DIR="${BUILD_DIR:-build/plasma-bringup}"
 ISO_ROOT="$BUILD_DIR/iso_root"
 ISO="$BUILD_DIR/nox-plasma.iso"
 ROOTFS="$BUILD_DIR/plasma-rootfs.cpio"
-ROOTFS_KIND="${PLASMA_ROOTFS:-tiny}"
+ROOTFS_KIND="${PLASMA_ROOTFS:-alpine}"
 PYTHON="${PYTHON:-python3}"
 LIMINE="${LIMINE:-limine}"
 QEMU="${QEMU:-qemu-system-x86_64}"
@@ -79,8 +79,12 @@ echo "Rootfs mode: $ROOTFS_KIND"
 echo "Expected early proof:"
 echo "  [linux] Plasma rootfs mounted from Limine module: ..."
 echo "  [linux] Plasma rootfs probe PASS: /etc/nox-release is readable ..."
-echo "After Bash starts, test userspace rootfs I/O with:"
-echo '  source /etc/nox-release; echo "rootfs=$NAME kernel=$KERNEL stage=$USERSPACE_STAGE"'
+if [ "$ROOTFS_KIND" = "alpine" ]; then
+    echo "  [linux] Plasma ELF gate: /bin/busybox ..."
+    echo "  [linux] Plasma ELF gate: PT_INTERP=..."
+    echo "  [linux] Plasma ELF gate PASS: loader=..."
+fi
+echo "After Bash starts, rootfs files remain available through Linux file syscalls."
 echo ""
 
 # Plasma itself will need substantially more than 512 MiB. Supplying a second
