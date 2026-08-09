@@ -6,6 +6,8 @@ MACHINE="${2:-pc}"
 ISO="${3:-build/nox.iso}"
 QEMU_BIN="${QEMU:-qemu-system-x86_64}"
 QEMU_EXTRA_ARGS="${QEMU_EXTRA_ARGS:-}"
+QEMU_ACCEL_ARGS="${QEMU_ACCEL_ARGS:-}"
+QEMU_TCG_TB_SIZE="${QEMU_TCG_TB_SIZE:-256}"
 
 if ! command -v "$QEMU_BIN" >/dev/null 2>&1; then
     echo "error: missing $QEMU_BIN" >&2
@@ -74,10 +76,20 @@ case "$MACHINE" in
         ;;
 esac
 
+# Apple Silicon cannot execute an x86_64 system guest through same-ISA hardware
+# virtualization, so this bring-up runs through TCG.  KDE/Qt/LLVM has a much
+# larger translated-code working set than the early kernel.  Give TCG a larger
+# translation-block cache to reduce avoidable cache flush/retranslation churn.
+# Leave an explicit QEMU_ACCEL_ARGS untouched so callers can override this.
+if [ -z "$QEMU_ACCEL_ARGS" ] && [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+    QEMU_ACCEL_ARGS="-accel tcg,tb-size=$QEMU_TCG_TB_SIZE"
+    echo "QEMU acceleration: cross-ISA TCG with ${QEMU_TCG_TB_SIZE} MiB translation cache"
+fi
+
 # QEMU_EXTRA_ARGS is intentionally a shell-split argument fragment supplied by
 # trusted project scripts (for example scripts/run-qemu-tpm.sh). Do not pass
 # untrusted user input through it.
-COMMON_ARGS="-M $MACHINE $CPU_ARGS -m 512M -cdrom $ISO -serial stdio -monitor none -no-reboot -no-shutdown $QEMU_EXTRA_ARGS"
+COMMON_ARGS="-M $MACHINE $CPU_ARGS $QEMU_ACCEL_ARGS -m 512M -cdrom $ISO -serial stdio -monitor none -no-reboot -no-shutdown $QEMU_EXTRA_ARGS"
 
 if [ "$MODE" = "gui" ]; then
     echo "QEMU display: graphical session detected; opening display window"
