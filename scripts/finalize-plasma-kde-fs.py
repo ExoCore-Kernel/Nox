@@ -228,9 +228,10 @@ static bool plasma_kde_mode_size_for_path(const char *input,
     if (rootfs_available() && rootfs_lookup_follow(resolved, &node)) {
         *mode = node.mode;
         *size = node.size;
-        /* Stable identity is more important than uniqueness for this statx
-         * bring-up path; rootfs fstat has its stronger identity finalizer. */
-        *ino = 2;
+        /* statx must agree with the older stat/fstat identity shim.  Qt uses
+         * (dev,ino) while canonicalising plugin and data directories; reporting
+         * the same inode for every CPIO node collapses unrelated paths together. */
+        *ino = plasma_rootfs_inode(&node);
         return true;
     }
     return false;
