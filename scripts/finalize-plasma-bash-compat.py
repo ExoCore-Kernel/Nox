@@ -25,6 +25,12 @@ def main() -> int:
     if declarations not in text:
         text = text.replace(marker, declarations + marker, 1)
 
+    # Real Alpine root filesystems rely on symlinks for libc/ld-musl and many
+    # BusyBox applets. File syscalls should expose the resolved file rather than
+    # the CPIO symlink payload bytes.
+    text = text.replace("rootfs_lookup(path, &node)",
+                        "rootfs_lookup_follow(path, &node)")
+
     path.write_text(text, encoding="utf-8")
     print(f"Finalized Plasma Bash compatibility unit: {path}")
     return 0
