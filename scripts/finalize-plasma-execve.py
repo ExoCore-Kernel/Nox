@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Make post-teardown Plasma execve failures return safely to the kernel.
 
-Also harden normal rootfs path operations to follow CPIO symlinks and emit
+Also verify normal rootfs path operations already follow CPIO symlinks and emit
 precise pre-teardown diagnostics for executable/PT_INTERP lookup failures.
 """
 
@@ -25,20 +25,21 @@ def main() -> int:
     path = pathlib.Path(sys.argv[1])
     text = path.read_text(encoding="utf-8")
 
-    # stat/open/access-style rootfs lookups should follow symlinks.  The original
-    # early shell VFS used rootfs_lookup() directly, which is closer to lstat()
-    # semantics and can expose symlink payload bytes instead of the target file.
-    # Plasma's loader and tools expect ordinary Linux open/stat behaviour.
-    lookup_fragment = "rootfs_available() && rootfs_lookup(path, &node)"
-    lookup_count = text.count(lookup_fragment)
-    if lookup_count < 2:
-        raise RuntimeError(f"expected at least two ordinary rootfs lookup sites, found {lookup_count}")
-    text = text.replace(
-        lookup_fragment,
-        "rootfs_available() && rootfs_lookup_follow(path, &node)",
-    )
+    # finalize-plasma-bash-compat.py runs earlier and already converts ordinary
+    # rootfs open/stat-style lookups to rootfs_lookup_follow().  Older versions
+    # of this finalizer tried to perform the same conversion a second time and
+    # therefore aborted when the correct pre-hardened pattern was absent.
+    raw_lookup = "rootfs_available() && rootfs_lookup(path, &node)"
+    followed_lookup = "rootfs_available() && rootfs_lookup_follow(path, &node)"
+    raw_count = text.count(raw_lookup)
+    if raw_count:
+        text = text.replace(raw_lookup, followed_lookup)
+    if text.count(followed_lookup) < 2:
+        raise RuntimeError(
+            "ordinary rootfs open/stat paths are not symlink-following as expected"
+        )
 
-    # Make ENOENT/ENOEXEC actionable.  dbus-run-session reports only strerror(),
+    # Make ENOENT/ENOEXEC actionable. dbus-run-session reports only strerror(),
     # so without this distinction a present executable and a missing PT_INTERP
     # both look like the same generic 'No such file or directory' failure.
     text = replace_once(
