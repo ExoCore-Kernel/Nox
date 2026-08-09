@@ -26,7 +26,13 @@ BRANCH = "v3.21"
 MIRROR = "https://dl-cdn.alpinelinux.org/alpine"
 MAGIC = b"070701"
 
+# Keep icu-data-full as an explicit top-level constraint.  Alpine's icu-libs
+# dependency is on the virtual provider "icu-data" and normally resolves to the
+# much smaller icu-data-en package.  Qt6 Qt5Compat, pulled in by Plasma, requires
+# icu-data-full specifically.  Giving the full provider to apko up front avoids
+# committing the solver to icu-data-en before it reaches that Qt dependency.
 PLASMA_PACKAGES = [
+    "icu-data-full",
     "alpine-base",
     "plasma-desktop",
     "plasma-workspace-x11",
