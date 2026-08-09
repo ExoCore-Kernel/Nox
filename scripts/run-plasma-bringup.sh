@@ -56,6 +56,7 @@ make BUILD_DIR="$BUILD_DIR" \
 "$PYTHON" scripts/finalize-plasma-runtime.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-low-fds.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-xorg-locks.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/finalize-plasma-xkb-paths.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-epoll.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-epoll.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-cooperative-io.py "$BASH_COMPAT_C"
