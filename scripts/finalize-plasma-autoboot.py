@@ -42,7 +42,7 @@ def main() -> int:
     env_anchor = '    const char env3[] = "PS1=nox# ";\n'
     env_block = r'''    const char env3[] = "PS1=nox# ";
     const char env4_auto[] =
-        "PROMPT_COMMAND=unset PROMPT_COMMAND; "
+        "PROMPT_COMMAND=unset PROMPT_COMMAND; export HOME=/tmp/runtime-root; "
         "/usr/bin/xinit /bin/sh /root/.xinitrc -- /usr/bin/Xorg :0 "
         "-retro -extension GLX -nolisten tcp -novtswitch -sharevts "
         "-logfile /dev/null";
