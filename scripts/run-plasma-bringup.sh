@@ -33,8 +33,8 @@ make BUILD_DIR="$BUILD_DIR" \
     twilight limine
 
 # GUI-only generated Linux ABI: read-only Alpine CPIO + getdents, writable
-# /tmp and /run, pipes/AF_UNIX, direct fbdev mmap, dynamic ELF/musl, and
-# cooperative multi-process scheduling. Normal Nox builds remain unchanged.
+# /tmp and /run, pipes/AF_UNIX, epoll, direct fbdev mmap, dynamic ELF/musl,
+# and cooperative multi-process scheduling. Normal Nox builds remain unchanged.
 "$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-rootfs-stat.py "$BASH_COMPAT_C"
@@ -50,6 +50,7 @@ make BUILD_DIR="$BUILD_DIR" \
 "$PYTHON" scripts/finalize-plasma-process-stack.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-runtime.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-low-fds.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/add-plasma-epoll.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-cooperative-io.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-generated-c.py "$BASH_COMPAT_C"
 rm -f "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
