@@ -39,6 +39,7 @@ BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 "$PYTHON" scripts/finalize-plasma-scheduler.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-runtime.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-low-fds.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/finalize-plasma-cooperative-io.py "$BASH_COMPAT_C"
 rm -f "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
