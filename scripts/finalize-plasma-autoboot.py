@@ -9,8 +9,16 @@ Do not use xinit here. During bring-up xinit creates an early synchronization
 pipe and can put both the shell parent and xinit child to sleep before either
 Xorg or the Plasma client has exec'd, leaving the cooperative scheduler with no
 runnable process. Instead reproduce the already-proven manual sequence exactly:
-start Xorg in the background, set DISPLAY/runtime environment, then exec
-`dbus-run-session startplasma-x11` in the original shell process.
+start Xorg in the background, set DISPLAY/runtime environment, then exec the
+session bus in the original shell process.
+
+For the first Plasma client, invoke the known-good musl loader directly with
+/usr/bin/startplasma-x11 as its target.  The rootfs definitely contains the
+launcher, but the kernel-side exec path currently reports ENOENT for that one
+binary.  Direct loader invocation keeps the real Plasma executable and its
+normal userspace dynamic-link process while bypassing only that failing kernel
+PT_INTERP/exec transition.  The exec finalizer also logs exact path-resolution
+failures so the underlying ABI issue remains visible instead of hidden.
 
 Passing `nox.shell=1` (or the compatibility alias `boot=shell`) on Limine's
 kernel command line suppresses PROMPT_COMMAND and leaves the normal nox# shell.
@@ -51,7 +59,8 @@ def main() -> int:
         "/usr/bin/Xorg :0 -retro -extension GLX -nolisten tcp -novtswitch "
         "-sharevts -logfile /dev/null & export DISPLAY=:0; "
         "export XDG_RUNTIME_DIR=/tmp/runtime-root; export KWIN_COMPOSE=N; "
-        "exec /usr/bin/dbus-run-session /usr/bin/startplasma-x11";
+        "exec /usr/bin/dbus-run-session /lib/ld-musl-x86_64.so.1 "
+        "/usr/bin/startplasma-x11";
     const char env4_shell[] = "PROMPT_COMMAND=";
     const char *env4 = twilight_boot_shell_requested() ? env4_shell : env4_auto;
 '''
@@ -96,7 +105,7 @@ def main() -> int:
         "    if (twilight_boot_shell_requested())\n"
         "        trace(\"boot mode: interactive shell requested by Limine (nox.shell=1)\");\n"
         "    else\n"
-        "        trace(\"boot mode: automatic Xorg background + Plasma session\");\n"
+        "        trace(\"boot mode: automatic Xorg + D-Bus + Plasma via musl loader\");\n"
     )
     text = rep(text, trace_anchor, trace_block)
 
