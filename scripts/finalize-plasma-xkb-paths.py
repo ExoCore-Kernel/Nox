@@ -2,18 +2,19 @@
 """Finish filesystem semantics needed by Xorg's xkbcomp helper.
 
 The early Plasma ABI intentionally has a read-only CPIO root plus a tiny
-writable runtime VFS.  xkbcomp needs two things that were still missing:
+writable runtime VFS. xkbcomp needs two things that were still missing:
 
 * chdir("/usr/share/X11/xkb") followed by relative opens of rules/symbols/etc.
 * a writable /var/lib/xkb/server-*.xkm output path.
 
 This finalizer adds cwd-aware path resolution for the common path syscalls and
-extends the writable bring-up VFS only to /var/lib/xkb.  It does not make the
+extends the writable bring-up VFS only to /var/lib/xkb. It does not make the
 whole CPIO writable.
 """
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 
@@ -31,7 +32,7 @@ def main() -> int:
     path = pathlib.Path(sys.argv[1])
     text = path.read_text(encoding="utf-8")
 
-    # Make the XKB cache directory a small writable runtime node.  /var and
+    # Make the XKB cache directory a small writable runtime node. /var and
     # /var/lib remain supplied by the read-only Alpine CPIO; only this leaf is
     # overlaid by Twilight's bring-up VFS.
     text = rep(
@@ -62,7 +63,7 @@ def main() -> int:
 '''
     text = rep(text, old_runtime_path, new_runtime_path)
 
-    # Resolve relative Linux paths against the process cwd.  xkbcomp deliberately
+    # Resolve relative Linux paths against the process cwd. xkbcomp deliberately
     # chdirs into its -R directory and then opens files such as rules/evdev and
     # symbols/pc by relative name, so merely making chdir() return success would
     # still leave it unable to read the XKB database.
@@ -159,14 +160,9 @@ def main() -> int:
 '''
     text = rep(text, access_old, access_new)
 
-    chdir_old = '''    case SYS_CHDIR: {
-        char path[128];
-        if (!copy_user_string(a1, path, sizeof(path))) return -LINUX_EFAULT;
-        if (!string_equal(path, "/") && !string_equal(path, ".")) return -LINUX_ENOENT;
-        current_directory[0] = '/'; current_directory[1] = '\0';
-        return 0;
-    }
-'''
+    # Several earlier Plasma finalizers can legitimately add logic inside the
+    # CHDIR case. Matching its old exact body made this transform brittle. Replace
+    # the whole switch case structurally, stopping at the following syscall case.
     chdir_new = '''    case SYS_CHDIR: {
         char path[256], resolved[256];
         if (!copy_user_string(a1, path, sizeof(path))) return -LINUX_EFAULT;
@@ -191,7 +187,13 @@ def main() -> int:
         return 0;
     }
 '''
-    text = rep(text, chdir_old, chdir_new)
+    chdir_pattern = re.compile(
+        r"(?ms)^    case SYS_CHDIR: \{\n.*?^    \}\n(?=    case SYS_[A-Z0-9_]+:)"
+    )
+    matches = list(chdir_pattern.finditer(text))
+    if len(matches) != 1:
+        raise RuntimeError(f"expected exactly one SYS_CHDIR switch case, found {len(matches)}")
+    text = chdir_pattern.sub(chdir_new, text, count=1)
 
     path.write_text(text, encoding="utf-8")
     print(f"Finalized XKB cwd + writable cache paths: {path}")
