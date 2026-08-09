@@ -2,20 +2,16 @@
 """Provide the interval-timer ABI Xlib uses while opening the X11 display.
 
 startplasma-x11 calls kCheckRunning(), which opens DISPLAY through libX11.
-Twilight's AF_UNIX connect already succeeds, but libX11 immediately calls
-setitimer(2) while establishing the connection.  Returning ENOSYS makes
-XOpenDisplay abort before it sends the X11 setup packet, leaving Xorg to accept
-an otherwise-valid socket and block waiting for bytes that never arrive.
-
-For the current in-kernel/local X11 transport we do not need asynchronous timer
-delivery yet: connect/handshake scheduling is cooperative and cannot stall on a
-real network.  Accept getitimer/setitimer and report an inactive timer.  This is
-bring-up compatibility only; real SIGALRM/timer expiry belongs in the general
-signal/timer implementation later.
+Twilight's AF_UNIX connect already succeeds, but libX11 calls setitimer(2) while
+establishing the connection.  The local bring-up transport does not need real
+SIGALRM delivery yet, so this finalizer supplies inert interval timers and then
+runs the X11 socket-fcntl/TX finalizer that corrects descriptor status semantics
+and traces the first setup packet.
 """
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import sys
 
 
@@ -71,6 +67,12 @@ def main() -> int:
 
     path.write_text(text, encoding="utf-8")
     print(f"Finalized inert getitimer/setitimer ABI for XOpenDisplay: {path}")
+
+    # Keep the shell runner stable while the X11 compatibility layer is being
+    # iterated: the sibling finalizer owns runtime-socket fcntl semantics and TX
+    # diagnostics, and is intentionally applied after the timer cases above.
+    sibling = pathlib.Path(__file__).with_name("finalize-plasma-x11-socket-fcntl.py")
+    subprocess.run([sys.executable, str(sibling), str(path)], check=True)
     return 0
 
 
