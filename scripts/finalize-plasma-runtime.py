@@ -96,16 +96,15 @@ def main() -> int:
 '''
     text=rep(text,old,new)
 
-    # Qt/KDE's dynamic dependency closure is much larger than the early Xorg/
-    # D-Bus tests.  16,384 pages capped a process at 64 MiB of tracked mappings,
-    # which can make musl fail later DT_NEEDED mappings and then report a cascade
-    # of unresolved relocation symbols.  Give each Plasma process 256 MiB of
-    # tracked user pages for bring-up.  This is metadata capacity; physical RAM
-    # is still allocated only for pages that are actually mapped.
+    # Qt/KDE plus Mesa's software stack can map well over 256 MiB while the
+    # first Plasma session is resolving its dependency closure (LLVM alone is
+    # large).  The 65,536-page bring-up ceiling was reached in a real boot, so
+    # allow 131,072 tracked pages = 512 MiB per process.  This is metadata
+    # capacity; physical RAM is still allocated only for pages actually mapped.
     page_pattern = r"(?m)^#define SHELL_MAX_PAGES\s+\d+u$"
     if len(re.findall(page_pattern, text)) != 1:
         raise RuntimeError("expected exactly one SHELL_MAX_PAGES definition")
-    text = re.sub(page_pattern, "#define SHELL_MAX_PAGES     65536u", text, count=1)
+    text = re.sub(page_pattern, "#define SHELL_MAX_PAGES     131072u", text, count=1)
 
     # Do not let another page-budget exhaustion look like mysterious linker
     # breakage.  Emit one explicit diagnostic from the common page allocator.
@@ -122,7 +121,7 @@ def main() -> int:
 
     text=rep(text,"#define PLASMA_MAX_PROCESSES 12u\n","#define PLASMA_MAX_PROCESSES 24u\n")
 
-    p.write_text(text,encoding="utf-8"); print(f"Finalized Plasma runtime IPC + per-process FDs + 256 MiB page budget: {p}"); return 0
+    p.write_text(text,encoding="utf-8"); print(f"Finalized Plasma runtime IPC + per-process FDs + 512 MiB page budget: {p}"); return 0
 if __name__=="__main__":
     try: raise SystemExit(main())
     except Exception as e: print(f"ERROR: {e}",file=sys.stderr); raise SystemExit(1)
