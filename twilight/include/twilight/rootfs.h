@@ -19,5 +19,11 @@ size_t rootfs_entry_count(void);
 
 /* Paths may be absolute (/usr/bin/foo) or archive-style (usr/bin/foo). */
 bool rootfs_lookup(const char *path, struct rootfs_node *out);
+
+/* Resolve ordinary CPIO symlinks while looking up a path. This is needed by
+ * real Linux root filesystems such as Alpine, where the musl loader/libc and
+ * many BusyBox applets are represented by symlinks. */
+bool rootfs_lookup_follow(const char *path, struct rootfs_node *out);
+
 size_t rootfs_read(const struct rootfs_node *node, size_t offset,
                    void *buffer, size_t size);
