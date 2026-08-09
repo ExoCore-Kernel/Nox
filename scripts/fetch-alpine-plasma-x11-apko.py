@@ -168,7 +168,10 @@ def verify_rootfs(root: pathlib.Path) -> None:
         "usr/bin/startplasma-x11",
         "usr/bin/dbus-run-session",
     ]
-    missing = [entry for entry in required if not (root / entry).exists()]
+    # Use lexists rather than Path.exists(): Alpine legitimately uses absolute
+    # symlinks inside the rootfs, and Path.exists() would follow those against
+    # the macOS host root instead of checking the extracted filesystem entry.
+    missing = [entry for entry in required if not os.path.lexists(root / entry)]
     if missing:
         raise RuntimeError("apko rootfs is missing required GUI files: " + ", ".join(missing))
     print("apko rootfs sanity check PASS: BusyBox + musl + Xorg + Plasma X11 + D-Bus")
