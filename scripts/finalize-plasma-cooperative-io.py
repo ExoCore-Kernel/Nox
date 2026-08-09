@@ -13,6 +13,11 @@ write to the same shared pipe copies bytes directly into the blocked reader's
 userspace buffer, records the read() return value, and makes it runnable again.
 The existing scheduler then resumes the reader as though the original read(2)
 had just returned.  Nonblocking pipes still receive EAGAIN.
+
+Do not place struct shell_image on the syscall transition stack here. Plasma's
+large page budget makes that structure hundreds of KiB while the transition
+stack is only 16 KiB. Reuse the static scheduler scratch image created by
+finalize-plasma-process-stack.py instead.
 """
 from __future__ import annotations
 
@@ -180,8 +185,11 @@ static void plasma_runtime_notify_pipe_write(int fd) {
             reader->blocked_pipe_object != writer->object)
             continue;
 
-        struct shell_image saved_image;
-        bytes_copy(&saved_image, &image, sizeof(image));
+        /* struct shell_image is hundreds of KiB in the Plasma build. Never put
+         * it on Twilight's 16 KiB syscall transition stack. The scheduler is
+         * cooperative/single-CPU here, so the existing static scratch image is
+         * safe for this short metadata swap too. */
+        bytes_copy(&plasma_scheduler_scratch_image, &image, sizeof(image));
         bytes_copy(&image, &reader->image, sizeof(image));
 
         uint64_t done = 0;
@@ -196,7 +204,7 @@ static void plasma_runtime_notify_pipe_write(int fd) {
             ++done;
         }
 
-        bytes_copy(&image, &saved_image, sizeof(image));
+        bytes_copy(&image, &plasma_scheduler_scratch_image, sizeof(image));
 
         reader->pending_result = done != 0 ? (int64_t)done :
                                  (fault ? -LINUX_EFAULT : -LINUX_EAGAIN);
