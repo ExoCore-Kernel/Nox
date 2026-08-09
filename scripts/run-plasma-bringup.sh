@@ -41,6 +41,7 @@ make BUILD_DIR="$BUILD_DIR" \
 "$PYTHON" scripts/add-plasma-getdents.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-file-mmap.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-runtime-ipc.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/finalize-plasma-xtrans-sockets.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-fbdev-v2.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-execve.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-execve.py "$BASH_COMPAT_C"
