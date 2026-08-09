@@ -45,6 +45,19 @@ struct plasma_fb_fix_screeninfo {
     uint16_t xpanstep, ypanstep, ywrapstep, pad0; uint32_t line_length, pad1;
     uint64_t mmio_start; uint32_t mmio_len, accel; uint16_t capabilities, reserved[2], pad2;
 };
+static bool plasma_fb_available(void) {
+    return framebuffer_width() != 0 && framebuffer_height() != 0 &&
+           framebuffer_bpp() != 0 && framebuffer_pitch() != 0 &&
+           framebuffer_size() != 0 && framebuffer_physical_address() != 0;
+}
+static void plasma_fb_trace_geometry(void) {
+    serial_write("[linux:fbdev] geometry ");
+    serial_u64(framebuffer_width()); serial_write("x");
+    serial_u64(framebuffer_height()); serial_write(" bpp=");
+    serial_u64(framebuffer_bpp()); serial_write(" pitch=");
+    serial_u64(framebuffer_pitch()); serial_write(" bytes size=");
+    serial_u64(framebuffer_size()); serial_write("\n");
+}
 static void plasma_fb_var(struct plasma_fb_var_screeninfo *v) {
     bytes_zero(v, sizeof(*v)); v->xres=(uint32_t)framebuffer_width(); v->yres=(uint32_t)framebuffer_height();
     v->xres_virtual=v->xres; v->yres_virtual=v->yres; v->bits_per_pixel=framebuffer_bpp();
@@ -60,19 +73,39 @@ static void plasma_fb_fix(struct plasma_fb_fix_screeninfo *f) {
     f->type=0; f->visual=2; f->line_length=(uint32_t)framebuffer_pitch();
 }
 static int64_t plasma_fb_ioctl(uint64_t request, uint64_t arg) {
-    if (!framebuffer_width() || !framebuffer_height() || framebuffer_bpp()!=32u) return -LINUX_ENODEV;
-    if (request==FBIOGET_VSCREENINFO) { struct plasma_fb_var_screeninfo v; plasma_fb_var(&v); return user_copy_out(arg,&v,sizeof(v))?0:-LINUX_EFAULT; }
-    if (request==FBIOGET_FSCREENINFO) { struct plasma_fb_fix_screeninfo f; plasma_fb_fix(&f); return user_copy_out(arg,&f,sizeof(f))?0:-LINUX_EFAULT; }
-    if (request==FBIOPUT_VSCREENINFO) { struct plasma_fb_var_screeninfo v; if(!user_copy_in(&v,arg,sizeof(v)))return -LINUX_EFAULT;
-        if(v.xres!=framebuffer_width()||v.yres!=framebuffer_height()||v.bits_per_pixel!=framebuffer_bpp())return -LINUX_EINVAL;
-        plasma_fb_var(&v); return user_copy_out(arg,&v,sizeof(v))?0:-LINUX_EFAULT; }
+    if (!plasma_fb_available()) {
+        serial_write("[linux:fbdev] ioctl rejected: framebuffer unavailable\n");
+        return -LINUX_ENODEV;
+    }
+    if (request==FBIOGET_VSCREENINFO) {
+        struct plasma_fb_var_screeninfo v; plasma_fb_var(&v);
+        serial_write("[linux:fbdev] FBIOGET_VSCREENINFO -> "); plasma_fb_trace_geometry();
+        return user_copy_out(arg,&v,sizeof(v))?0:-LINUX_EFAULT;
+    }
+    if (request==FBIOGET_FSCREENINFO) {
+        struct plasma_fb_fix_screeninfo f; plasma_fb_fix(&f);
+        serial_write("[linux:fbdev] FBIOGET_FSCREENINFO -> "); plasma_fb_trace_geometry();
+        return user_copy_out(arg,&f,sizeof(f))?0:-LINUX_EFAULT;
+    }
+    if (request==FBIOPUT_VSCREENINFO) {
+        struct plasma_fb_var_screeninfo v; if(!user_copy_in(&v,arg,sizeof(v)))return -LINUX_EFAULT;
+        /* fbdev's startup path may write back the mode it just read. Accept the
+         * native Twilight geometry and normalize all returned fields. */
+        if(v.xres!=framebuffer_width()||v.yres!=framebuffer_height()||
+           (v.bits_per_pixel!=0u && v.bits_per_pixel!=framebuffer_bpp()))return -LINUX_EINVAL;
+        plasma_fb_var(&v); return user_copy_out(arg,&v,sizeof(v))?0:-LINUX_EFAULT;
+    }
     if (request==FBIOPAN_DISPLAY || request==FBIOBLANK) return 0;
+    serial_write("[linux:fbdev] unsupported ioctl request="); serial_u64(request); serial_write("\n");
     return -LINUX_ENOTTY;
 }
 static int64_t plasma_fb_mmap(uint64_t address,uint64_t length,uint64_t prot,uint64_t flags,uint64_t offset) {
     if(offset||!length||(prot&PROT_EXEC)) return -LINUX_EINVAL;
     uint64_t phys=framebuffer_physical_address(), size=framebuffer_size();
-    if(!phys||!size||(phys&(TWILIGHT_PAGE_SIZE-1ull))) return -LINUX_ENODEV;
+    if(!plasma_fb_available()) return -LINUX_ENODEV;
+    /* Limine normally supplies page-aligned framebuffer memory. Keep the ABI
+     * strict here because vmm_map_page maps physical pages directly. */
+    if(phys&(TWILIGHT_PAGE_SIZE-1ull)) return -LINUX_ENODEV;
     if(length>size) return -LINUX_EINVAL;
     uint64_t ml=0; if(!align_up(length,&ml))return -LINUX_ENOMEM; uint64_t base=address;
     if((flags&MAP_FIXED)==0){base=image.mmap_next;if(!align_up(base,&base))return -LINUX_ENOMEM;}
@@ -95,11 +128,30 @@ static int64_t plasma_fb_mmap(uint64_t address,uint64_t length,uint64_t prot,uin
     text = rep(text, "    if (string_equal(path, \"/dev/tty\") || string_equal(path, \"/dev/null\"))\n        return fill_stat(stat_address, S_IFCHR | 0666u);\n",
                "    if (string_equal(path, \"/dev/tty\") || string_equal(path, \"/dev/null\") || string_equal(path, \"/dev/fb0\"))\n        return fill_stat(stat_address, S_IFCHR | 0666u);\n")
     text = rep(text, "    if (string_equal(path, \"/dev/null\")) return 4;\n",
-               "    if (string_equal(path, \"/dev/null\")) return 4;\n    if (string_equal(path, \"/dev/fb0\")) return PLASMA_FB_FD;\n")
+               "    if (string_equal(path, \"/dev/null\")) return 4;\n    if (string_equal(path, \"/dev/fb0\")) {\n        if (!plasma_fb_available()) return -LINUX_ENODEV;\n        serial_write(\"[linux:fbdev] open /dev/fb0 -> fd=5\\n\");\n        return PLASMA_FB_FD;\n    }\n")
     text = rep(text, "        if (!fd_is_tty((int)a1) && (int)a1 != 4) return -LINUX_EBADF;\n        return fill_stat(a2, S_IFCHR | 0666u);\n",
                "        if ((int)a1 == PLASMA_FB_FD) return fill_stat(a2, S_IFCHR | 0666u);\n        if (!fd_is_tty((int)a1) && (int)a1 != 4) return -LINUX_EBADF;\n        return fill_stat(a2, S_IFCHR | 0666u);\n")
     text = rep(text, "    if (!fd_is_tty(fd)) return -LINUX_EBADF;\n    switch (command) {\n",
                "    if (fd == PLASMA_FB_FD) { if (command==1||command==2||command==4) return 0; if(command==3)return 2; return 0; }\n    if (!fd_is_tty(fd)) return -LINUX_EBADF;\n    switch (command) {\n")
+
+    # access(2) is used by some fbdev probe paths before open(2). path_is_known
+    # already contains /dev/fb0, but make its availability semantic explicit so
+    # Xorg never accepts a phantom framebuffer when Limine did not provide one.
+    access_old = '''    case SYS_ACCESS: {
+        char path[128];
+        if (!copy_user_string(a1, path, sizeof(path))) return -LINUX_EFAULT;
+        return path_is_known(path) ? 0 : -LINUX_ENOENT;
+    }
+'''
+    access_new = '''    case SYS_ACCESS: {
+        char path[128];
+        if (!copy_user_string(a1, path, sizeof(path))) return -LINUX_EFAULT;
+        if (string_equal(path, "/dev/fb0")) return plasma_fb_available() ? 0 : -LINUX_ENOENT;
+        return path_is_known(path) ? 0 : -LINUX_ENOENT;
+    }
+'''
+    text = rep(text, access_old, access_new)
+
     p.write_text(text,encoding="utf-8"); print(f"Added runtime-compatible Twilight /dev/fb0 ABI: {p}"); return 0
 if __name__ == "__main__":
     try: raise SystemExit(main())
