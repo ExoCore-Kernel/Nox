@@ -7,6 +7,7 @@ ISO="$BUILD_DIR/nox-plasma.iso"
 ROOTFS="$BUILD_DIR/plasma-rootfs.cpio"
 ROOTFS_KIND="${PLASMA_ROOTFS:-plasma-x11}"
 REUSE_ROOTFS="${PLASMA_REUSE_ROOTFS:-0}"
+PLASMA_QEMU_RAM="${PLASMA_QEMU_RAM:-6144M}"
 PYTHON="${PYTHON:-python3}"
 LIMINE="${LIMINE:-limine}"
 QEMU="${QEMU:-qemu-system-x86_64}"
@@ -114,6 +115,7 @@ xorriso -as mkisofs \
 echo ""
 echo "Plasma bring-up ISO: $ISO"
 echo "Rootfs mode: $ROOTFS_KIND"
+echo "QEMU guest RAM: $PLASMA_QEMU_RAM"
 echo "Expected early proof:"
 echo "  [linux] Plasma rootfs mounted from Limine module: ..."
 echo "  [linux] Plasma ELF gate PASS: loader=..."
@@ -133,8 +135,8 @@ if [ "$ROOTFS_KIND" = "plasma-x11" ]; then
 fi
 echo ""
 
-# The Plasma CPIO itself is ~1.7 GiB. Give the guest enough headroom for the
-# boot module plus Xorg/Qt/Plasma runtime allocations while remaining sensible
-# on a 16 GiB development host.
-QEMU="$QEMU" QEMU_EXTRA_ARGS="-m 6144M ${QEMU_EXTRA_ARGS:-}" \
+# The Plasma CPIO itself is ~1.7 GiB. 6144M remains the default for workstation
+# bring-up, but small headless hosts (for example a Raspberry Pi) can lower the
+# guest allocation with PLASMA_QEMU_RAM=3072M while testing Xorg/ABI progress.
+QEMU="$QEMU" QEMU_EXTRA_ARGS="-m $PLASMA_QEMU_RAM ${QEMU_EXTRA_ARGS:-}" \
     sh scripts/run-qemu.sh "$MODE" pc "$ISO"
