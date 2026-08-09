@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add read-only getdents64 directory enumeration for the CPIO rootfs."""
+"""Add read-only getdents64 directory enumeration for the indexed CPIO rootfs."""
 
 from __future__ import annotations
 
@@ -29,7 +29,6 @@ def main() -> int:
 #define PLASMA_MODE_DIR  0040000u
 #define PLASMA_MODE_LNK  0120000u
 #define PLASMA_GETDENTS_RUNAWAY_LIMIT 100000u
-#define PLASMA_GETDENTS_TRACE_STRIDE 4096u
 
 struct __attribute__((packed)) plasma_linux_dirent64_head {
     uint64_t ino;
@@ -108,31 +107,15 @@ static int64_t plasma_emit_dirent(uint64_t buffer_address,
     return (int64_t)record_length;
 }
 
-static void plasma_getdents_trace_value(const char *label, uint64_t value) {
-    serial_write(label);
-    serial_u64(value);
-    serial_write("\n");
-}
-
 static int64_t plasma_getdents64(int fd, uint64_t buffer_address, uint64_t count) {
     struct rootfs_open_file *directory = rootfs_file_for_fd(fd);
     if (directory == 0) return -LINUX_EBADF;
     if ((directory->node.mode & PLASMA_MODE_MASK) != PLASMA_MODE_DIR) return -LINUX_ENOTDIR;
     if (count == 0 || !user_range(buffer_address, count, true)) return -LINUX_EFAULT;
 
-    serial_write("[linux:getdents64] enter fd=");
-    serial_u64((uint64_t)(unsigned int)fd);
-    serial_write(" count=");
-    serial_u64(count);
-    serial_write(" path=");
-    serial_write(directory->node.name != 0 ? directory->node.name : "<null>");
-    serial_write("\n");
-
     uint64_t written = 0;
     uint64_t cursor = directory->offset;
     uint64_t iterations = 0;
-
-    plasma_getdents_trace_value("[linux:getdents64] start cursor=", cursor);
 
     while (written < count) {
         if (++iterations > PLASMA_GETDENTS_RUNAWAY_LIMIT) {
@@ -167,42 +150,13 @@ static int64_t plasma_getdents64(int fd, uint64_t buffer_address, uint64_t count
                 return -LINUX_EIO;
             }
 
-            const uint64_t before_cursor = cursor;
             const size_t index = (size_t)(cursor - 2u);
-
-            if (index < 8u || (index % PLASMA_GETDENTS_TRACE_STRIDE) == 0u) {
-                serial_write("[linux:getdents64] scan index=");
-                serial_u64((uint64_t)index);
-                serial_write(" cursor=");
-                serial_u64(cursor);
-                serial_write(" total=");
-                serial_u64((uint64_t)total);
-                serial_write("\n");
-            }
-
             struct rootfs_node node;
             ++cursor;
-            if (cursor <= before_cursor) {
-                serial_write("[linux:getdents64] BUG: iterator did not advance\n");
-                directory->offset = before_cursor;
-                return -LINUX_EIO;
-            }
-
-            if (!rootfs_entry_at(index, &node)) {
-                serial_write("[linux:getdents64] rootfs_entry_at failed index=");
-                serial_u64((uint64_t)index);
-                serial_write("\n");
-                return -LINUX_EIO;
-            }
+            if (!rootfs_entry_at(index, &node)) return -LINUX_EIO;
 
             const char *child = 0;
             if (!plasma_immediate_child(directory->node.name, node.name, &child)) continue;
-
-            serial_write("[linux:getdents64] child index=");
-            serial_u64((uint64_t)index);
-            serial_write(" name=");
-            serial_write(child != 0 ? child : "<null>");
-            serial_write("\n");
 
             const int64_t rc = plasma_emit_dirent(buffer_address + written, count - written,
                                                    index + 2u, (int64_t)cursor,
@@ -211,11 +165,6 @@ static int64_t plasma_getdents64(int fd, uint64_t buffer_address, uint64_t count
             if (rc == 0) {
                 --cursor;
                 directory->offset = cursor;
-                serial_write("[linux:getdents64] output buffer full; saved cursor=");
-                serial_u64(cursor);
-                serial_write(" written=");
-                serial_u64(written);
-                serial_write("\n");
                 return (int64_t)written;
             }
             written += (uint64_t)rc;
@@ -226,13 +175,6 @@ static int64_t plasma_getdents64(int fd, uint64_t buffer_address, uint64_t count
     }
 
     directory->offset = cursor;
-    serial_write("[linux:getdents64] return bytes=");
-    serial_u64(written);
-    serial_write(" cursor=");
-    serial_u64(cursor);
-    serial_write(" iterations=");
-    serial_u64(iterations);
-    serial_write("\n");
     return (int64_t)written;
 }
 
@@ -249,7 +191,7 @@ static int64_t plasma_getdents64(int fd, uint64_t buffer_address, uint64_t count
     )
 
     path.write_text(text, encoding="utf-8")
-    print(f"Added CPIO getdents64 directory enumeration + bounded diagnostics: {path}")
+    print(f"Added indexed CPIO getdents64 directory enumeration: {path}")
     return 0
 
 
