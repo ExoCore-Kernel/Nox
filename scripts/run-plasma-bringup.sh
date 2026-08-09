@@ -8,6 +8,7 @@ ROOTFS="$BUILD_DIR/plasma-rootfs.cpio"
 ROOTFS_KIND="${PLASMA_ROOTFS:-plasma-x11}"
 REUSE_ROOTFS="${PLASMA_REUSE_ROOTFS:-0}"
 PLASMA_QEMU_RAM="${PLASMA_QEMU_RAM:-6144M}"
+PLASMA_TRACE="${PLASMA_TRACE:-0}"
 PYTHON="${PYTHON:-python3}"
 LIMINE="${LIMINE:-limine}"
 QEMU="${QEMU:-qemu-system-x86_64}"
@@ -19,6 +20,14 @@ if ! command -v xorriso >/dev/null 2>&1; then
     echo "error: missing xorriso" >&2
     exit 1
 fi
+
+case "$PLASMA_TRACE" in
+    0|1) ;;
+    *)
+        echo "error: PLASMA_TRACE must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
 
 # The Plasma bring-up transforms the generated Bash compatibility unit in
 # place.  A previous run therefore leaves a file newer than its pristine
@@ -69,7 +78,12 @@ make BUILD_DIR="$BUILD_DIR" \
 "$PYTHON" scripts/finalize-plasma-threads-current.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-generated-c.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-autoboot.py "$BASH_COMPAT_C"
-"$PYTHON" scripts/finalize-plasma-xorg-trace.py "$BASH_COMPAT_C"
+if [ "$PLASMA_TRACE" = "1" ]; then
+    "$PYTHON" scripts/finalize-plasma-xorg-trace.py "$BASH_COMPAT_C"
+fi
+# Always apply the semantics-preserving performance pass last so it can turn
+# the fully generated process/thread state into pointer-selected active state.
+"$PYTHON" scripts/finalize-plasma-performance.py "$BASH_COMPAT_C" "$PLASMA_TRACE"
 rm -f "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
@@ -136,6 +150,7 @@ echo ""
 echo "Plasma bring-up ISO: $ISO"
 echo "Rootfs mode: $ROOTFS_KIND"
 echo "QEMU guest RAM: $PLASMA_QEMU_RAM"
+echo "Bring-up tracing: $([ "$PLASMA_TRACE" = "1" ] && echo verbose || echo performance)"
 echo "Expected early proof:"
 echo "  [linux] Plasma rootfs mounted from Limine module: ..."
 echo "  [linux] Plasma ELF gate PASS: loader=..."
