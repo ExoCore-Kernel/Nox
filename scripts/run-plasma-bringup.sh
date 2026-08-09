@@ -16,28 +16,28 @@ if ! command -v xorriso >/dev/null 2>&1; then
     exit 1
 fi
 
-# Keep the already-proven static Bash Linux ABI as a diagnostic console while
-# the real Alpine process is brought up. The Plasma-only generated ABI is then
-# extended with real rootfs files, directory enumeration, file-backed mmap,
-# fbdev, dynamic exec, and a cooperative multi-process scheduler. Normal
-# driver/Bash builds stay untouched.
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
     BUSYBOX_SELF_TEST=1 \
     BASH_SHELL=1 \
     twilight limine
 
+# The GUI bring-up ABI is generated only for this build.  It layers real CPIO
+# files/directories, file-backed mmap, writable runtime IPC, fbdev, dynamic ELF,
+# and cooperative multi-process scheduling over the already-proven Bash ABI.
 BASH_COMPAT_C="$BUILD_DIR/generated/linux/bash-shell-compat.c"
 BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 "$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-getdents.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-file-mmap.py "$BASH_COMPAT_C"
-"$PYTHON" scripts/add-plasma-fbdev.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/add-plasma-runtime-ipc.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/add-plasma-fbdev-v2.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-execve.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-execve.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-processes.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-scheduler.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/finalize-plasma-runtime.py "$BASH_COMPAT_C"
 rm -f "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
@@ -90,21 +90,19 @@ echo "Rootfs mode: $ROOTFS_KIND"
 echo "Expected early proof:"
 echo "  [linux] Plasma rootfs mounted from Limine module: ..."
 echo "  [linux] Plasma ELF gate PASS: loader=..."
-echo "  [linux:process] cooperative scheduler online; init pid=1"
 if [ "$ROOTFS_KIND" = "plasma-x11" ]; then
-    echo "Full GUI userspace is present. After entering Alpine with:"
+    echo "GUI stack included: Alpine 3.21.7, Plasma 6.2, Xorg, fbdev, D-Bus"
+    echo "At nox#, enter the real Alpine shell:"
     echo "  exec /bin/busybox sh -i"
-    echo "verify directory enumeration and Xorg with:"
+    echo "Then run:"
     echo "  ls /usr/bin | head"
     echo "  /usr/bin/Xorg -version"
-    echo "then attempt the framebuffer X server with:"
     echo "  /usr/bin/Xorg :0 -retro -nolisten tcp -novtswitch -sharevts -logfile /dev/null"
-    echo "Run this script with 'gui' instead of 'headless' to see the QEMU framebuffer."
-else
-    echo "After the nox# prompt, enter Alpine with: exec /bin/busybox sh -i"
+    echo "Expected framebuffer proof when Xorg maps video memory:"
+    echo "  [linux:fbdev] mapped /dev/fb0 into userspace"
+    echo "Use 'gui' mode so the QEMU display is visible."
 fi
 echo ""
 
-# Plasma/Qt needs room for the larger initramfs and multiple address spaces.
 QEMU="$QEMU" QEMU_EXTRA_ARGS="-m 3072M ${QEMU_EXTRA_ARGS:-}" \
     sh scripts/run-qemu.sh "$MODE" pc "$ISO"
