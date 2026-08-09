@@ -38,6 +38,8 @@ PLASMA_PACKAGES = [
     "plasma-workspace-x11",
     "xorg-server",
     "xf86-video-fbdev",
+    "xf86-input-mouse",
+    "xf86-input-keyboard",
     "xinit",
     "dbus",
 ]
@@ -99,8 +101,6 @@ def extract_trusted_tar(archive: pathlib.Path, destination: pathlib.Path) -> Non
         try:
             tf.extractall(destination, filter=rootfs_filter)
         except TypeError:
-            # Python versions predating extraction filters already allow the
-            # Alpine absolute symlinks.  Filter the member list ourselves.
             members = []
             for member in tf.getmembers():
                 if member.isdev():
@@ -169,13 +169,33 @@ def build_with_apko(work: pathlib.Path, target_root: pathlib.Path) -> None:
 def write_nox_configuration(root: pathlib.Path) -> None:
     (root / "etc/X11/xorg.conf.d").mkdir(parents=True, exist_ok=True)
     (root / "etc/X11/xorg.conf.d/20-twilight-fbdev.conf").write_text(
+        '''Section "Module"\n'''
+        '''    Disable "glx"\n'''
+        '''    Load "fbdevhw"\n'''
+        '''    Load "shadow"\n'''
+        '''EndSection\n\n'''
         '''Section "Device"\n'''
         '''    Identifier "TwilightFramebuffer"\n'''
         '''    Driver "fbdev"\n'''
         '''    Option "fbdev" "/dev/fb0"\n'''
         '''EndSection\n\n'''
+        '''Section "Monitor"\n'''
+        '''    Identifier "TwilightMonitor"\n'''
+        '''EndSection\n\n'''
+        '''Section "Screen"\n'''
+        '''    Identifier "TwilightScreen"\n'''
+        '''    Device "TwilightFramebuffer"\n'''
+        '''    Monitor "TwilightMonitor"\n'''
+        '''    DefaultDepth 32\n'''
+        '''EndSection\n\n'''
+        '''Section "ServerLayout"\n'''
+        '''    Identifier "TwilightLayout"\n'''
+        '''    Screen 0 "TwilightScreen" 0 0\n'''
+        '''EndSection\n\n'''
         '''Section "ServerFlags"\n'''
         '''    Option "AutoAddDevices" "false"\n'''
+        '''    Option "AutoAddGPU" "false"\n'''
+        '''    Option "AutoBindGPU" "false"\n'''
         '''EndSection\n''',
         encoding="ascii",
     )
@@ -206,14 +226,14 @@ def verify_rootfs(root: pathlib.Path) -> None:
         "usr/bin/Xorg",
         "usr/bin/startplasma-x11",
         "usr/bin/dbus-run-session",
+        "usr/lib/xorg/modules/drivers/fbdev_drv.so",
+        "usr/lib/xorg/modules/libfbdevhw.so",
+        "etc/X11/xorg.conf.d/20-twilight-fbdev.conf",
     ]
-    # Use lexists rather than Path.exists(): Alpine legitimately uses absolute
-    # symlinks inside the rootfs, and Path.exists() would follow those against
-    # the macOS host root instead of checking the extracted filesystem entry.
     missing = [entry for entry in required if not os.path.lexists(root / entry)]
     if missing:
         raise RuntimeError("apko rootfs is missing required GUI files: " + ", ".join(missing))
-    print("apko rootfs sanity check PASS: BusyBox + musl + Xorg + Plasma X11 + D-Bus")
+    print("apko rootfs sanity check PASS: BusyBox + musl + Xorg + fbdev + Plasma X11 + D-Bus")
 
 
 def normalized_rel(path: pathlib.Path, root: pathlib.Path) -> str:
