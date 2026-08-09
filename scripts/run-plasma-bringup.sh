@@ -84,6 +84,7 @@ fi
 # Always apply the semantics-preserving performance pass last so it can turn
 # the fully generated process/thread state into pointer-selected active state.
 "$PYTHON" scripts/finalize-plasma-performance.py "$BASH_COMPAT_C" "$PLASMA_TRACE"
+"$PYTHON" scripts/finalize-plasma-performance-cleanup.py "$BASH_COMPAT_C"
 rm -f "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
