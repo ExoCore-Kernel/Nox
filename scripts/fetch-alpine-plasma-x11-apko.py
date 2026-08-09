@@ -36,6 +36,7 @@ PLASMA_PACKAGES = [
     "alpine-base",
     "plasma-desktop",
     "plasma-workspace-x11",
+    "qt6-qtbase-x11",
     "xorg-server",
     "xf86-video-fbdev",
     "xf86-input-libinput",
@@ -225,12 +226,13 @@ def verify_rootfs(root: pathlib.Path) -> None:
         "usr/lib/xorg/modules/drivers/fbdev_drv.so",
         "usr/lib/xorg/modules/libfbdevhw.so",
         "usr/lib/xorg/modules/input/libinput_drv.so",
+        "usr/lib/qt6/plugins/platforms/libqxcb.so",
         "etc/X11/xorg.conf.d/20-twilight-fbdev.conf",
     ]
     missing = [entry for entry in required if not os.path.lexists(root / entry)]
     if missing:
         raise RuntimeError("apko rootfs is missing required GUI files: " + ", ".join(missing))
-    print("apko rootfs sanity check PASS: BusyBox + musl + Xorg + fbdev + libinput + Plasma X11 + D-Bus")
+    print("apko rootfs sanity check PASS: BusyBox + musl + Xorg + fbdev + libinput + Qt XCB + Plasma X11 + D-Bus")
 
 
 def normalized_rel(path: pathlib.Path, root: pathlib.Path) -> str:
