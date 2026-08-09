@@ -172,6 +172,28 @@ size_t rootfs_entry_count(void) {
     return rootfs_ready ? rootfs_entries : 0u;
 }
 
+bool rootfs_entry_at(size_t index, struct rootfs_node *out) {
+    if (!rootfs_ready || out == 0 || index >= rootfs_entries) return false;
+
+    size_t offset = 0;
+    size_t current = 0;
+    while (offset < rootfs_archive_size) {
+        struct parsed_entry entry;
+        if (!parse_entry(offset, &entry)) return false;
+        if (string_equal(entry.name, "TRAILER!!!")) return false;
+        if (current == index) {
+            out->name = entry.name;
+            out->data = entry.data;
+            out->size = entry.size;
+            out->mode = entry.mode;
+            return true;
+        }
+        ++current;
+        offset = entry.next_offset;
+    }
+    return false;
+}
+
 bool rootfs_lookup(const char *path, struct rootfs_node *out) {
     if (!rootfs_ready || path == 0 || out == 0) return false;
 
