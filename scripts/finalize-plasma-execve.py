@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Make post-teardown Plasma execve failures return safely to the kernel."""
+"""Make post-teardown Plasma execve failures return safely to the kernel.
+
+Also harden normal rootfs path operations to follow CPIO symlinks and emit
+precise pre-teardown diagnostics for executable/PT_INTERP lookup failures.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +24,62 @@ def main() -> int:
 
     path = pathlib.Path(sys.argv[1])
     text = path.read_text(encoding="utf-8")
+
+    # stat/open/access-style rootfs lookups should follow symlinks.  The original
+    # early shell VFS used rootfs_lookup() directly, which is closer to lstat()
+    # semantics and can expose symlink payload bytes instead of the target file.
+    # Plasma's loader and tools expect ordinary Linux open/stat behaviour.
+    lookup_fragment = "rootfs_available() && rootfs_lookup(path, &node)"
+    lookup_count = text.count(lookup_fragment)
+    if lookup_count < 2:
+        raise RuntimeError(f"expected at least two ordinary rootfs lookup sites, found {lookup_count}")
+    text = text.replace(
+        lookup_fragment,
+        "rootfs_available() && rootfs_lookup_follow(path, &node)",
+    )
+
+    # Make ENOENT/ENOEXEC actionable.  dbus-run-session reports only strerror(),
+    # so without this distinction a present executable and a missing PT_INTERP
+    # both look like the same generic 'No such file or directory' failure.
+    text = replace_once(
+        text,
+        "    struct rootfs_node executable;\n"
+        "    if (!rootfs_lookup_follow(filename, &executable)) return -LINUX_ENOENT;\n"
+        "    struct elf64_ehdr main_header;\n"
+        "    if (!plasma_elf_header(&executable, &main_header)) return -LINUX_ENOEXEC;\n",
+        "    struct rootfs_node executable;\n"
+        "    if (!rootfs_lookup_follow(filename, &executable)) {\n"
+        "        struct rootfs_node raw_executable;\n"
+        "        serial_write(\"[linux:exec] ENOENT resolving executable: \" );\n"
+        "        serial_write(filename);\n"
+        "        if (rootfs_lookup(filename, &raw_executable))\n"
+        "            serial_write(\" (archive entry exists; symlink target resolution failed)\\n\");\n"
+        "        else\n"
+        "            serial_write(\" (archive entry absent)\\n\");\n"
+        "        return -LINUX_ENOENT;\n"
+        "    }\n"
+        "    struct elf64_ehdr main_header;\n"
+        "    if (!plasma_elf_header(&executable, &main_header)) {\n"
+        "        serial_write(\"[linux:exec] ENOEXEC non-ELF/unsupported executable: \" );\n"
+        "        serial_write(filename);\n"
+        "        serial_write(\"\\n\");\n"
+        "        return -LINUX_ENOEXEC;\n"
+        "    }\n",
+    )
+
+    text = replace_once(
+        text,
+        "    if (has_interpreter && !rootfs_lookup_follow(interpreter_path, &interpreter))\n"
+        "        return -LINUX_ENOENT;\n",
+        "    if (has_interpreter && !rootfs_lookup_follow(interpreter_path, &interpreter)) {\n"
+        "        serial_write(\"[linux:exec] ENOENT resolving PT_INTERP for \" );\n"
+        "        serial_write(filename);\n"
+        "        serial_write(\": \" );\n"
+        "        serial_write(interpreter_path);\n"
+        "        serial_write(\"\\n\");\n"
+        "        return -LINUX_ENOENT;\n"
+        "    }\n",
+    )
 
     helper = r'''static int64_t plasma_exec_abandon(const char *reason) {
     serial_write("[linux:plasma] execve replacement failed after old image teardown: ");
@@ -71,7 +131,7 @@ def main() -> int:
     )
 
     path.write_text(text, encoding="utf-8")
-    print(f"Finalized Plasma execve failure handling: {path}")
+    print(f"Finalized Plasma execve failure handling + symlink resolution diagnostics: {path}")
     return 0
 
 
