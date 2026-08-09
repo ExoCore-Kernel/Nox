@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Build an Alpine 3.21 x86_64 Plasma/X11 CPIO rootfs on an ARM64 host.
+"""Build an Alpine 3.21 x86_64 Plasma/X11 CPIO rootfs cross-platform.
 
-A Raspberry Pi cannot execute the target x86_64 apk binary, so this script also
-fetches the matching Alpine aarch64 minirootfs and invokes its native apk through
-its musl loader.  apk then installs x86_64 packages into a separate writable
-root with scripts disabled.  Finally the target tree is streamed into CPIO newc.
+On Linux/aarch64, use the matching Alpine aarch64 minirootfs and invoke its
+native apk through musl while asking apk to populate an x86_64 target root.
+On macOS (or other non-Linux hosts), use Docker/Podman only for that apk install
+step. Downloading, configuration, and CPIO generation remain native Python.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import os
 import pathlib
+import platform
 import shutil
 import stat
 import subprocess
@@ -89,9 +90,30 @@ def extract_rootfs(archive: pathlib.Path, destination: pathlib.Path) -> None:
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
     with tarfile.open(archive, "r:gz") as tf:
-        # Alpine release archives contain a normal root tree.  We intentionally
-        # preserve symlinks because musl and Plasma package layouts rely on them.
         tf.extractall(destination)
+
+
+def write_repositories(target_root: pathlib.Path) -> pathlib.Path:
+    repositories = target_root / "etc/apk/repositories"
+    repositories.parent.mkdir(parents=True, exist_ok=True)
+    repositories.write_text(
+        f"{MIRROR}/{BRANCH}/main\n{MIRROR}/{BRANCH}/community\n",
+        encoding="ascii",
+    )
+    return repositories
+
+
+def apk_arguments(root: str, repositories: str) -> list[str]:
+    return [
+        "--root", root,
+        "--arch", "x86_64",
+        "--repositories-file", repositories,
+        "--no-cache",
+        "--no-scripts",
+        "--no-chown",
+        "add",
+        *PLASMA_PACKAGES,
+    ]
 
 
 def run_native_apk(tool_root: pathlib.Path, target_root: pathlib.Path) -> None:
@@ -100,31 +122,71 @@ def run_native_apk(tool_root: pathlib.Path, target_root: pathlib.Path) -> None:
     if not loader.exists() or not apk.exists():
         raise RuntimeError("aarch64 Alpine tool root does not contain musl loader + /sbin/apk")
 
-    repositories = target_root / "etc/apk/repositories"
-    repositories.parent.mkdir(parents=True, exist_ok=True)
-    repositories.write_text(
-        f"{MIRROR}/{BRANCH}/main\n{MIRROR}/{BRANCH}/community\n",
-        encoding="ascii",
-    )
-
+    repositories = write_repositories(target_root)
     library_path = f"{tool_root}/lib:{tool_root}/usr/lib"
     command = [
         str(loader), "--library-path", library_path, str(apk),
-        "--root", str(target_root),
-        "--arch", "x86_64",
-        "--repositories-file", str(repositories),
-        "--no-cache",
-        "--allow-untrusted",
-        "--no-scripts",
-        "--no-chown",
-        "add",
-        *PLASMA_PACKAGES,
+        *apk_arguments(str(target_root), str(repositories)),
     ]
-    print("Installing Alpine Plasma/X11 dependency closure into x86_64 target root")
+    print("Installing Alpine Plasma/X11 dependency closure with native aarch64 apk")
     print("Packages:", " ".join(PLASMA_PACKAGES))
     result = subprocess.run(command, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"native aarch64 apk failed with exit code {result.returncode}")
+
+
+def find_container_runtime() -> str | None:
+    for name in ("docker", "podman"):
+        executable = shutil.which(name)
+        if executable:
+            return executable
+    return None
+
+
+def run_container_apk(target_root: pathlib.Path) -> None:
+    runtime = find_container_runtime()
+    if runtime is None:
+        raise RuntimeError(
+            "macOS Plasma rootfs build needs Docker Desktop or Podman for the Alpine apk step. "
+            "Install/start one, then rerun the same command."
+        )
+
+    write_repositories(target_root)
+    target = target_root.resolve()
+    command = [
+        runtime,
+        "run", "--rm",
+        "-v", f"{target}:/target",
+        "alpine:3.21",
+        "/sbin/apk",
+        *apk_arguments("/target", "/target/etc/apk/repositories"),
+    ]
+    print(f"Installing Alpine Plasma/X11 dependency closure via {pathlib.Path(runtime).name}")
+    print("Packages:", " ".join(PLASMA_PACKAGES))
+    result = subprocess.run(command, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"containerized apk failed with exit code {result.returncode}; "
+            "make sure the container runtime is running"
+        )
+
+
+def install_plasma_packages(cache: pathlib.Path, work: pathlib.Path,
+                            target_root: pathlib.Path) -> None:
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+
+    if system == "linux" and machine in ("aarch64", "arm64"):
+        arm_archive = download_release(cache, "aarch64")
+        tool_root = work / "tool-aarch64"
+        extract_rootfs(arm_archive, tool_root)
+        run_native_apk(tool_root, target_root)
+        return
+
+    # macOS cannot execute Alpine's Linux musl loader directly. A tiny
+    # container boundary is the most reliable cross-host way to run apk while
+    # still producing the exact same x86_64 target filesystem.
+    run_container_apk(target_root)
 
 
 def write_nox_configuration(root: pathlib.Path) -> None:
@@ -229,13 +291,17 @@ def main() -> int:
     work = output.parent / "plasma-x11-build"
     cache = output.parent / "downloads"
     target_root = work / "root-x86_64"
-    tool_root = work / "tool-aarch64"
+
+    # Check host capability before pulling the full Plasma package closure.
+    if platform.system().lower() != "linux" and find_container_runtime() is None:
+        raise RuntimeError(
+            "This host cannot run Alpine apk natively. Install/start Docker Desktop or Podman, "
+            "then rerun scripts/run-plasma-bringup.sh gui."
+        )
 
     x86_archive = download_release(cache, "x86_64")
-    arm_archive = download_release(cache, "aarch64")
     extract_rootfs(x86_archive, target_root)
-    extract_rootfs(arm_archive, tool_root)
-    run_native_apk(tool_root, target_root)
+    install_plasma_packages(cache, work, target_root)
     write_nox_configuration(target_root)
 
     count, size = stream_tree_as_cpio(target_root, output)
