@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Finalize runtime IPC declarations, writev, and process FD inheritance."""
 from __future__ import annotations
-import pathlib, sys
+import pathlib, re, sys
 
 def rep(text: str, old: str, new: str, count: int = 1) -> str:
     if text.count(old) < count:
@@ -97,7 +97,13 @@ def main() -> int:
     text=rep(text,old,new)
 
     # Increase resident-page and process metadata ceilings for Qt/KDE binaries.
-    text=rep(text,"#define SHELL_MAX_PAGES     768u\n","#define SHELL_MAX_PAGES     16384u\n")
+    # expand-plasma-page-budget.py runs earlier and currently raises the source
+    # value from 768 to 8192 pages. Match the definition structurally so this
+    # finalizer remains valid if that earlier budget changes again.
+    page_pattern = r"(?m)^#define SHELL_MAX_PAGES\s+\d+u$"
+    if len(re.findall(page_pattern, text)) != 1:
+        raise RuntimeError("expected exactly one SHELL_MAX_PAGES definition")
+    text = re.sub(page_pattern, "#define SHELL_MAX_PAGES     16384u", text, count=1)
     text=rep(text,"#define PLASMA_MAX_PROCESSES 12u\n","#define PLASMA_MAX_PROCESSES 24u\n")
 
     p.write_text(text,encoding="utf-8"); print(f"Finalized Plasma runtime IPC + per-process FDs: {p}"); return 0
