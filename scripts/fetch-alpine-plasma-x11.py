@@ -90,7 +90,18 @@ def extract_rootfs(archive: pathlib.Path, destination: pathlib.Path) -> None:
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
     with tarfile.open(archive, "r:gz") as tf:
-        tf.extractall(destination)
+        # Python 3.14 changed tarfile.extractall() to use the restrictive
+        # 'data' filter by default. Alpine minirootfs archives intentionally
+        # contain absolute symlinks such as /usr/bin/yes -> /bin/busybox, which
+        # that filter rejects with AbsoluteLinkError. The archive has already
+        # been SHA-256 verified against Alpine's release checksum above, so use
+        # the explicit fully_trusted policy for this known release archive.
+        # Older Python versions did not expose the filter= keyword and already
+        # behaved equivalently, so retain a compatibility fallback.
+        try:
+            tf.extractall(destination, filter="fully_trusted")
+        except TypeError:
+            tf.extractall(destination)
 
 
 def write_repositories(target_root: pathlib.Path) -> pathlib.Path:
