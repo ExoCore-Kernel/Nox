@@ -163,7 +163,10 @@ def main() -> int:
     # Several earlier Plasma finalizers can legitimately add logic inside the
     # CHDIR case. Matching its old exact body made this transform brittle. Replace
     # the whole switch case structurally, stopping at the following syscall case.
-    chdir_new = '''    case SYS_CHDIR: {
+    # Keep this a raw Python string, and use a callable re.sub replacement below:
+    # otherwise Python/re.sub would turn the C "\\n" escape into a literal newline
+    # inside the generated C string and break compilation.
+    chdir_new = r'''    case SYS_CHDIR: {
         char path[256], resolved[256];
         if (!copy_user_string(a1, path, sizeof(path))) return -LINUX_EFAULT;
         if (!plasma_resolve_path(path, resolved, sizeof(resolved))) return -LINUX_ENOENT;
@@ -193,7 +196,7 @@ def main() -> int:
     matches = list(chdir_pattern.finditer(text))
     if len(matches) != 1:
         raise RuntimeError(f"expected exactly one SYS_CHDIR switch case, found {len(matches)}")
-    text = chdir_pattern.sub(chdir_new, text, count=1)
+    text = chdir_pattern.sub(lambda _match: chdir_new, text, count=1)
 
     path.write_text(text, encoding="utf-8")
     print(f"Finalized XKB cwd + writable cache paths: {path}")
