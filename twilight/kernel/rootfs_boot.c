@@ -5,6 +5,8 @@
 #include <linux/printk.h>
 #include <twilight/rootfs.h>
 
+void plasma_elf_probe(void);
+
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_module_request rootfs_module_request = {
     .id = LIMINE_MODULE_REQUEST_ID,
@@ -34,12 +36,16 @@ static int rootfs_boot_init(void) {
            rootfs_entry_count(), (unsigned long long)module->size);
 
     struct rootfs_node release;
-    if (rootfs_lookup("/etc/nox-release", &release)) {
+    if (rootfs_lookup_follow("/etc/nox-release", &release)) {
         printk("[linux] Plasma rootfs probe PASS: /etc/nox-release is readable (%zu bytes)",
                release.size);
     } else {
         pr_warn("Plasma rootfs mounted but /etc/nox-release is missing");
     }
+
+    /* Immediately inspect the real userspace entry point. This turns an Alpine
+     * boot into useful exec/dynamic-loader diagnostics before Bash starts. */
+    plasma_elf_probe();
     return 0;
 }
 
