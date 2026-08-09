@@ -1,5 +1,6 @@
 #include <limine.h>
 #include <twilight/framebuffer.h>
+#include <twilight/pmm.h>
 
 static struct limine_framebuffer *fb;
 
@@ -76,4 +77,48 @@ size_t framebuffer_width(void) {
 
 size_t framebuffer_height(void) {
     return fb == NULL ? 0 : fb->height;
+}
+
+size_t framebuffer_pitch(void) {
+    return fb == NULL ? 0 : fb->pitch;
+}
+
+size_t framebuffer_size(void) {
+    return fb == NULL ? 0 : (size_t)fb->pitch * (size_t)fb->height;
+}
+
+unsigned framebuffer_bpp(void) {
+    return fb == NULL ? 0u : (unsigned)fb->bpp;
+}
+
+uint64_t framebuffer_physical_address(void) {
+    if (fb == NULL || fb->address == NULL) return 0;
+    const uint64_t address = (uint64_t)(uintptr_t)fb->address;
+    const uint64_t hhdm = pmm_hhdm_offset();
+    if (hhdm == 0 || address < hhdm) return 0;
+    return address - hhdm;
+}
+
+uint8_t framebuffer_red_mask_size(void) {
+    return fb == NULL ? 0 : fb->red_mask_size;
+}
+
+uint8_t framebuffer_red_mask_shift(void) {
+    return fb == NULL ? 0 : fb->red_mask_shift;
+}
+
+uint8_t framebuffer_green_mask_size(void) {
+    return fb == NULL ? 0 : fb->green_mask_size;
+}
+
+uint8_t framebuffer_green_mask_shift(void) {
+    return fb == NULL ? 0 : fb->green_mask_shift;
+}
+
+uint8_t framebuffer_blue_mask_size(void) {
+    return fb == NULL ? 0 : fb->blue_mask_size;
+}
+
+uint8_t framebuffer_blue_mask_shift(void) {
+    return fb == NULL ? 0 : fb->blue_mask_shift;
 }
