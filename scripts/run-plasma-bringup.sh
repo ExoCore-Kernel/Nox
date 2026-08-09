@@ -77,6 +77,11 @@ make BUILD_DIR="$BUILD_DIR" \
 "$PYTHON" scripts/finalize-plasma-kde-fs.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-vfs-paths.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-threads-current.py "$BASH_COMPAT_C"
+# Resource lifetime is finalized only after pthread/CLONE_FILES support exists,
+# so duplicated/inherited descriptors can be counted against the correct thread
+# group instead of treating each scheduler slot as a separate open-file table.
+"$PYTHON" scripts/finalize-plasma-pipe-lifetime.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/finalize-plasma-eventfd.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-generated-c.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-autoboot.py "$BASH_COMPAT_C"
 if [ "$PLASMA_TRACE" = "1" ]; then
