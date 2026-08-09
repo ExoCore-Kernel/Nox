@@ -61,7 +61,12 @@ case "$ROOTFS_KIND" in
         ;;
     plasma-x11)
         echo "Plasma rootfs mode: Alpine 3.21.7 + Plasma 6.2 + Xorg fbdev"
-        "$PYTHON" scripts/fetch-alpine-plasma-x11.py "$ROOTFS"
+        if [ "$(uname -s)" = "Darwin" ]; then
+            echo "macOS rootfs backend: native apko (no Docker daemon required)"
+            "$PYTHON" scripts/fetch-alpine-plasma-x11-apko.py "$ROOTFS"
+        else
+            "$PYTHON" scripts/fetch-alpine-plasma-x11.py "$ROOTFS"
+        fi
         ;;
     *)
         echo "error: PLASMA_ROOTFS must be 'tiny', 'alpine', or 'plasma-x11'" >&2
