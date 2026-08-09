@@ -25,10 +25,11 @@ make BUILD_DIR="$BUILD_DIR" \
     twilight limine
 
 # Plasma bring-up extends only the generated Bash ABI unit for now. Normal
-# Bash/driver builds remain untouched. The transforms add read-only rootfs FDs,
-# file-backed mmap() for musl/DSOs, then real single-process execve() for ET_DYN
-# + PT_INTERP so Bash can replace itself with Alpine/musl before fork/clone
-# scheduling exists.
+# Bash/driver builds remain untouched. The transforms add the real CPIO files,
+# rootfs-backed mmap, ET_DYN/PT_INTERP execve, then the first process boundary:
+# serialized fork/clone/vfork with an independent child CR3 plus exit/wait4.
+# The serialized scheduler is intentionally only the first process milestone;
+# it unlocks ordinary fork->exec shell commands before concurrent tasks/threads.
 BASH_COMPAT_C="$BUILD_DIR/generated/linux/bash-shell-compat.c"
 BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 "$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
@@ -36,6 +37,7 @@ BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 "$PYTHON" scripts/add-plasma-file-mmap.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-execve.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-execve.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/add-plasma-processes.py "$BASH_COMPAT_C"
 rm -f "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
@@ -89,7 +91,8 @@ if [ "$ROOTFS_KIND" = "alpine" ]; then
     echo "  [linux] Plasma ELF gate: PT_INTERP=..."
     echo "  [linux] Plasma ELF gate PASS: loader=..."
     echo "After the nox# prompt, run: exec /bin/busybox sh -i"
-    echo "A successful image replacement prints: [linux:plasma] execve switched image ... through musl"
+    echo "Then test processes with: /bin/busybox echo child-process-ok"
+    echo "Expected process proof: fork created child -> execve -> child exited -> wait4 reaped child"
 fi
 echo ""
 
