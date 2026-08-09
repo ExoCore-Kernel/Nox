@@ -65,6 +65,7 @@ def main() -> int:
 
 static uint64_t plasma_parent_context[PLASMA_PROCESS_CONTEXT_WORDS];
 static struct shell_image plasma_parent_image;
+static struct shell_image plasma_child_build_image;
 static struct shell_image plasma_zombie_image;
 static struct rootfs_open_file plasma_parent_open_files[ROOTFS_FD_COUNT];
 static char plasma_parent_cwd[64];
@@ -198,11 +199,12 @@ static int64_t plasma_fork_process(uint64_t clone_flags,
             return -LINUX_EFAULT;
     }
 
-    struct shell_image child;
-    if (!plasma_clone_image(&image, &child)) return -LINUX_ENOMEM;
+    plasma_child_build_image = (struct shell_image){0};
+    if (!plasma_clone_image(&image, &plasma_child_build_image)) return -LINUX_ENOMEM;
 
     plasma_save_parent_process();
-    image = child;
+    image = plasma_child_build_image;
+    plasma_child_build_image = (struct shell_image){0};
     plasma_parent_suspended = true;
     plasma_current_pid = PLASMA_CHILD_PID;
     plasma_child_tid_address =
@@ -313,9 +315,17 @@ static int64_t plasma_wait4(int64_t requested_pid,
     )
     text = replace_once(
         text,
-        "    case SYS_GETPID:\n    case SYS_GETTID: return 1;\n    case SYS_GETPPID: return 0;\n",
-        "    case SYS_GETPID:\n"
-        "    case SYS_GETTID: return plasma_current_pid;\n"
+        "    case SYS_GETTID: return 1;\n",
+        "    case SYS_GETTID: return plasma_current_pid;\n",
+    )
+    text = replace_once(
+        text,
+        "    case SYS_GETPID:\n",
+        "    case SYS_GETPID: return plasma_current_pid;\n",
+    )
+    text = replace_once(
+        text,
+        "    case SYS_GETPPID: return 0;\n",
         "    case SYS_GETPPID: return plasma_current_pid == PLASMA_CHILD_PID ? PLASMA_PARENT_PID : 0;\n",
     )
     text = replace_once(
