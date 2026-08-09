@@ -20,13 +20,6 @@ normal userspace dynamic-link process while bypassing only that failing kernel
 PT_INTERP/exec transition.  The exec finalizer also logs exact path-resolution
 failures so the underlying ABI issue remains visible instead of hidden.
 
-During bring-up, force Alpine's compiled Qt6 plugin directory and enable Qt
-plugin diagnostics.  Plasma has reached ksplashqml but Qt currently reports an
-empty platform-plugin search location.  Alpine installs libqxcb.so below
-/usr/lib/qt6/plugins/platforms; setting QT_PLUGIN_PATH both gives the intended
-location explicitly and makes QT_DEBUG_PLUGINS explain any remaining dlopen or
-VFS failure rather than collapsing it into a generic "xcb not found" message.
-
 Passing `nox.shell=1` (or the compatibility alias `boot=shell`) on Limine's
 kernel command line suppresses PROMPT_COMMAND and leaves the normal nox# shell.
 If Plasma exits, PROMPT_COMMAND has already unset itself, so Bash will not
@@ -66,8 +59,9 @@ def main() -> int:
         "/usr/bin/Xorg :0 -retro -extension GLX -nolisten tcp -novtswitch "
         "-sharevts -logfile /dev/null & export DISPLAY=:0; "
         "export XDG_RUNTIME_DIR=/tmp/runtime-root; export KWIN_COMPOSE=N; "
-        "export QT_PLUGIN_PATH=/usr/lib/qt6/plugins; export QT_QPA_PLATFORM=xcb; "
-        "export QT_DEBUG_PLUGINS=1; "
+        "export QT_PLUGIN_PATH=/usr/lib/qt6/plugins; "
+        "export QT_QPA_PLATFORM_PLUGIN_PATH=/usr/lib/qt6/plugins/platforms; "
+        "export QT_QPA_PLATFORM=xcb; export QT_DEBUG_PLUGINS=1; "
         "exec /usr/bin/dbus-run-session /lib/ld-musl-x86_64.so.1 "
         "/usr/bin/startplasma-x11";
     const char env4_shell[] = "PROMPT_COMMAND=";
@@ -119,7 +113,7 @@ def main() -> int:
     text = rep(text, trace_anchor, trace_block)
 
     path.write_text(text, encoding="utf-8")
-    print(f"Finalized Plasma graphical autoboot + forced Qt6 XCB plugin diagnostics: {path}")
+    print(f"Finalized Plasma default graphical autoboot + Limine shell override: {path}")
     return 0
 
 
