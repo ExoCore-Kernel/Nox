@@ -10,11 +10,16 @@
 #define CPIO_MODE_SYMLINK     0120000u
 #define ROOTFS_PATH_MAX       512u
 #define ROOTFS_SYMLINK_MAX    12u
+/* Plasma currently has about 52k entries. Keep a generous fixed-capacity
+ * zero-copy metadata index so rootfs_entry_at()/lookup() do not re-parse a
+ * 1.7+ GiB CPIO archive for every directory entry or shared-library open. */
+#define ROOTFS_MAX_ENTRIES    131072u
 
 static const uint8_t *rootfs_archive;
 static size_t rootfs_archive_size;
 static size_t rootfs_entries;
 static bool rootfs_ready;
+static struct rootfs_node rootfs_index[ROOTFS_MAX_ENTRIES];
 
 static size_t align4(size_t value) {
     return (value + 3u) & ~(size_t)3u;
@@ -149,6 +154,16 @@ bool rootfs_init(const void *archive, size_t size) {
             trailer_seen = true;
             break;
         }
+        if (rootfs_entries >= ROOTFS_MAX_ENTRIES) {
+            rootfs_archive = 0;
+            rootfs_archive_size = 0;
+            rootfs_entries = 0;
+            return false;
+        }
+        rootfs_index[rootfs_entries].name = entry.name;
+        rootfs_index[rootfs_entries].data = entry.data;
+        rootfs_index[rootfs_entries].size = entry.size;
+        rootfs_index[rootfs_entries].mode = entry.mode;
         ++rootfs_entries;
         offset = entry.next_offset;
     }
@@ -174,42 +189,17 @@ size_t rootfs_entry_count(void) {
 
 bool rootfs_entry_at(size_t index, struct rootfs_node *out) {
     if (!rootfs_ready || out == 0 || index >= rootfs_entries) return false;
-
-    size_t offset = 0;
-    size_t current = 0;
-    while (offset < rootfs_archive_size) {
-        struct parsed_entry entry;
-        if (!parse_entry(offset, &entry)) return false;
-        if (string_equal(entry.name, "TRAILER!!!")) return false;
-        if (current == index) {
-            out->name = entry.name;
-            out->data = entry.data;
-            out->size = entry.size;
-            out->mode = entry.mode;
-            return true;
-        }
-        ++current;
-        offset = entry.next_offset;
-    }
-    return false;
+    *out = rootfs_index[index];
+    return true;
 }
 
 bool rootfs_lookup(const char *path, struct rootfs_node *out) {
     if (!rootfs_ready || path == 0 || out == 0) return false;
-
-    size_t offset = 0;
-    while (offset < rootfs_archive_size) {
-        struct parsed_entry entry;
-        if (!parse_entry(offset, &entry)) return false;
-        if (string_equal(entry.name, "TRAILER!!!")) return false;
-        if (path_equal(path, entry.name)) {
-            out->name = entry.name;
-            out->data = entry.data;
-            out->size = entry.size;
-            out->mode = entry.mode;
+    for (size_t i = 0; i < rootfs_entries; ++i) {
+        if (path_equal(path, rootfs_index[i].name)) {
+            *out = rootfs_index[i];
             return true;
         }
-        offset = entry.next_offset;
     }
     return false;
 }
