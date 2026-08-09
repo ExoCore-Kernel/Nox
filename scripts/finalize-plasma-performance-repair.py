@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Repair known generator edge cases after the Plasma performance pass.
-
-This file is intentionally small and strict. It exists to keep the generated C
-valid while the larger performance transform is still implemented as a source
-rewrite. It repairs two whole-object forms that the pointer rewrite cannot match
-safely, fixes the re.sub replacement-string backslash bug in log_unknown(), and
-then lexically verifies that no C string literal crosses a physical newline.
-"""
+"""Repair and validate generated C after the Plasma performance pass."""
 from __future__ import annotations
 
 import pathlib
@@ -49,7 +42,9 @@ def validate_no_multiline_c_strings(text: str) -> None:
                     line += 1
                     i += 1
                     continue
-                raise RuntimeError(f"generated C contains unterminated string literal before line {line}")
+                raise RuntimeError(
+                    f"generated C contains unterminated string literal before line {line}"
+                )
             if escaped:
                 escaped = False
             elif ch == "\\":
@@ -61,7 +56,9 @@ def validate_no_multiline_c_strings(text: str) -> None:
 
         if in_char:
             if ch == "\n":
-                raise RuntimeError(f"generated C contains unterminated character literal before line {line}")
+                raise RuntimeError(
+                    f"generated C contains unterminated character literal before line {line}"
+                )
             if escaped:
                 escaped = False
             elif ch == "\\":
@@ -109,37 +106,35 @@ def main() -> int:
     path = pathlib.Path(sys.argv[1])
     text = path.read_text(encoding="utf-8")
 
-    # Python re.sub() interprets backslash escapes in a replacement string.
-    # finalize-plasma-performance.py used a direct replacement containing \\n,
-    # which became a literal physical newline in this C string.
+    # re.sub replacement strings interpret backslash escapes. The performance
+    # pass therefore produced one physical newline inside the ENOSYS C string.
     broken = '    serial_write(" -> -ENOSYS\n");\n'
     fixed = '    serial_write(" -> -ENOSYS\\n");\n'
-    if broken in text:
+    repaired_string = broken in text
+    if repaired_string:
         text = text.replace(broken, fixed, 1)
 
-    # The pointer conversion handles image.foo, &image and sizeof(image), but a
-    # whole-object assignment has none of those syntactic forms. Preserve the
-    # exact semantics by assigning through the selected active-image pointer.
+    # Whole-object assignments are the one standalone `image` syntax not caught
+    # by the pointer conversion. Assign through the selected image instead.
     whole_image = "image = (struct shell_image){0};"
     whole_count = text.count(whole_image)
     if whole_count:
-        text = text.replace(whole_image, "*plasma_active_image = (struct shell_image){0};")
+        text = text.replace(
+            whole_image,
+            "*plasma_active_image = (struct shell_image){0};",
+        )
 
-    # There must be no remaining standalone legacy image object after the pass.
-    # These checks are deliberately narrow so process->image remains valid.
-    leftovers = [
-        "\n    image = ",
-        "\n        image = ",
-        "\nimage = ",
-    ]
-    for fragment in leftovers:
+    for fragment in ("\n    image = ", "\n        image = ", "\nimage = "):
         if fragment in text:
-            raise RuntimeError(f"legacy standalone image assignment survived performance pass: {fragment!r}")
+            raise RuntimeError(
+                f"legacy standalone image assignment survived performance pass: {fragment!r}"
+            )
 
     validate_no_multiline_c_strings(text)
     path.write_text(text, encoding="utf-8")
     print(
-        f"Validated Plasma performance-generated C: repaired-string={broken not in text}, "
+        "Validated Plasma performance-generated C: "
+        f"repaired-enosys-string={int(repaired_string)} "
         f"whole-image-assignments={whole_count}: {path}"
     )
     return 0
