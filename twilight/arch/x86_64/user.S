@@ -129,6 +129,95 @@ linux_exec_set_return_state:
     ret
 .size linux_exec_set_return_state, .-linux_exec_set_return_state
 
+/*
+ * Process bring-up helpers.  The serialized fork implementation snapshots the
+ * full user register state at the syscall boundary, runs a copied child CR3,
+ * then restores this snapshot when the child exits.  The context array layout
+ * is intentionally simple and private to the Plasma bring-up C shim:
+ *   0 RIP, 1 RSP, 2 RFLAGS,
+ *   3 RDI, 4 RSI, 5 RDX, 6 R10, 7 R8, 8 R9,
+ *   9 RBX, 10 RBP, 11 R12, 12 R13, 13 R14, 14 R15.
+ */
+.global linux_process_capture_context
+.type linux_process_capture_context, @function
+linux_process_capture_context:
+    movq linux_saved_user_rip(%rip), %rax
+    movq %rax, 0(%rdi)
+    movq linux_saved_user_rsp(%rip), %rax
+    movq %rax, 8(%rdi)
+    movq linux_saved_user_rflags(%rip), %rax
+    movq %rax, 16(%rdi)
+    movq linux_saved_arg1(%rip), %rax
+    movq %rax, 24(%rdi)
+    movq linux_saved_arg2(%rip), %rax
+    movq %rax, 32(%rdi)
+    movq linux_saved_arg3(%rip), %rax
+    movq %rax, 40(%rdi)
+    movq linux_saved_arg4(%rip), %rax
+    movq %rax, 48(%rdi)
+    movq linux_saved_arg5(%rip), %rax
+    movq %rax, 56(%rdi)
+    movq linux_saved_arg6(%rip), %rax
+    movq %rax, 64(%rdi)
+    movq linux_saved_rbx(%rip), %rax
+    movq %rax, 72(%rdi)
+    movq linux_saved_rbp(%rip), %rax
+    movq %rax, 80(%rdi)
+    movq linux_saved_r12(%rip), %rax
+    movq %rax, 88(%rdi)
+    movq linux_saved_r13(%rip), %rax
+    movq %rax, 96(%rdi)
+    movq linux_saved_r14(%rip), %rax
+    movq %rax, 104(%rdi)
+    movq linux_saved_r15(%rip), %rax
+    movq %rax, 112(%rdi)
+    ret
+.size linux_process_capture_context, .-linux_process_capture_context
+
+.global linux_process_restore_context
+.type linux_process_restore_context, @function
+linux_process_restore_context:
+    movq 0(%rdi), %rax
+    movq %rax, linux_saved_user_rip(%rip)
+    movq 8(%rdi), %rax
+    movq %rax, linux_saved_user_rsp(%rip)
+    movq 16(%rdi), %rax
+    movq %rax, linux_saved_user_rflags(%rip)
+    movq 24(%rdi), %rax
+    movq %rax, linux_saved_arg1(%rip)
+    movq 32(%rdi), %rax
+    movq %rax, linux_saved_arg2(%rip)
+    movq 40(%rdi), %rax
+    movq %rax, linux_saved_arg3(%rip)
+    movq 48(%rdi), %rax
+    movq %rax, linux_saved_arg4(%rip)
+    movq 56(%rdi), %rax
+    movq %rax, linux_saved_arg5(%rip)
+    movq 64(%rdi), %rax
+    movq %rax, linux_saved_arg6(%rip)
+    movq 72(%rdi), %rax
+    movq %rax, linux_saved_rbx(%rip)
+    movq 80(%rdi), %rax
+    movq %rax, linux_saved_rbp(%rip)
+    movq 88(%rdi), %rax
+    movq %rax, linux_saved_r12(%rip)
+    movq 96(%rdi), %rax
+    movq %rax, linux_saved_r13(%rip)
+    movq 104(%rdi), %rax
+    movq %rax, linux_saved_r14(%rip)
+    movq 112(%rdi), %rax
+    movq %rax, linux_saved_r15(%rip)
+    ret
+.size linux_process_restore_context, .-linux_process_restore_context
+
+.global linux_process_set_return_space
+.type linux_process_set_return_space, @function
+linux_process_set_return_space:
+    movq %rdi, linux_saved_return_cr3(%rip)
+    movq %rdi, user_saved_user_cr3(%rip)
+    ret
+.size linux_process_set_return_space, .-linux_process_set_return_space
+
 .global int80_stub
 .type int80_stub, @function
 int80_stub:
@@ -215,6 +304,12 @@ linux_syscall_entry:
     movq %r10, linux_saved_arg4(%rip)
     movq %r8, linux_saved_arg5(%rip)
     movq %r9, linux_saved_arg6(%rip)
+    movq %rbx, linux_saved_rbx(%rip)
+    movq %rbp, linux_saved_rbp(%rip)
+    movq %r12, linux_saved_r12(%rip)
+    movq %r13, linux_saved_r13(%rip)
+    movq %r14, linux_saved_r14(%rip)
+    movq %r15, linux_saved_r15(%rip)
 
     leaq user_transition_stack_end(%rip), %rsp
     andq $-16, %rsp
@@ -251,8 +346,24 @@ linux_syscall_entry:
 
     movq %rax, linux_saved_result(%rip)
 
-    /* Linux preserves the argument registers across the entry/exit machinery;
-     * RCX and R11 are the architecturally documented SYSCALL clobbers. */
+    /* A fork child or resumed parent may use a different lower-half page-table
+     * root. The transition stack and this code are shared in the upper half, so
+     * switching CR3 here is safe before restoring the selected userspace frame. */
+    movq linux_saved_return_cr3(%rip), %rax
+    testq %rax, %rax
+    je .Llinux_no_return_cr3_switch
+    movq %rax, %cr3
+    movq $0, linux_saved_return_cr3(%rip)
+.Llinux_no_return_cr3_switch:
+
+    /* Restore the complete selected process context. RCX/R11 are the documented
+     * SYSCALL clobbers and are reconstructed below as RIP/RFLAGS for SYSRETQ. */
+    movq linux_saved_rbx(%rip), %rbx
+    movq linux_saved_rbp(%rip), %rbp
+    movq linux_saved_r12(%rip), %r12
+    movq linux_saved_r13(%rip), %r13
+    movq linux_saved_r14(%rip), %r14
+    movq linux_saved_r15(%rip), %r15
     movq linux_saved_arg1(%rip), %rdi
     movq linux_saved_arg2(%rip), %rsi
     movq linux_saved_arg3(%rip), %rdx
@@ -343,5 +454,19 @@ linux_saved_arg5:
     .quad 0
 linux_saved_arg6:
     .quad 0
+linux_saved_rbx:
+    .quad 0
+linux_saved_rbp:
+    .quad 0
+linux_saved_r12:
+    .quad 0
+linux_saved_r13:
+    .quad 0
+linux_saved_r14:
+    .quad 0
+linux_saved_r15:
+    .quad 0
 linux_saved_result:
+    .quad 0
+linux_saved_return_cr3:
     .quad 0
