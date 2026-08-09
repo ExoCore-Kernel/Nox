@@ -10,11 +10,20 @@ PYTHON="${PYTHON:-python3}"
 LIMINE="${LIMINE:-limine}"
 QEMU="${QEMU:-qemu-system-x86_64}"
 MODE="${1:-auto}"
+BASH_COMPAT_C="$BUILD_DIR/generated/linux/bash-shell-compat.c"
+BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 
 if ! command -v xorriso >/dev/null 2>&1; then
     echo "error: missing xorriso" >&2
     exit 1
 fi
+
+# The Plasma bring-up transforms the generated Bash compatibility unit in
+# place.  A previous run therefore leaves a file newer than its pristine
+# sources, which Make would otherwise reuse as though it were an untouched
+# generated input.  Regenerate just this unit (and the kernel that links it)
+# on every bring-up run.  Keep downloads/rootfs caches and unrelated objects.
+rm -f "$BASH_COMPAT_C" "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
 
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
@@ -25,8 +34,6 @@ make BUILD_DIR="$BUILD_DIR" \
 # GUI-only generated Linux ABI: read-only Alpine CPIO + getdents, writable
 # /tmp and /run, pipes/AF_UNIX, direct fbdev mmap, dynamic ELF/musl, and
 # cooperative multi-process scheduling. Normal Nox builds remain unchanged.
-BASH_COMPAT_C="$BUILD_DIR/generated/linux/bash-shell-compat.c"
-BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 "$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-getdents.py "$BASH_COMPAT_C"
