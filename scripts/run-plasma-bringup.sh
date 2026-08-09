@@ -66,6 +66,7 @@ make BUILD_DIR="$BUILD_DIR" \
 "$PYTHON" scripts/finalize-plasma-x11-timers.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-x11-poll.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-kde-fs.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/finalize-plasma-threads.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-generated-c.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-autoboot.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-xorg-trace.py "$BASH_COMPAT_C"
