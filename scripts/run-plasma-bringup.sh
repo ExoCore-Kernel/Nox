@@ -24,13 +24,15 @@ make BUILD_DIR="$BUILD_DIR" \
     BASH_SHELL=1 \
     twilight limine
 
-# Plasma bring-up extends only the generated Bash ABI unit for now: real
-# read-only rootfs open/read/stat/lseek/close calls. Normal Bash/driver builds
-# remain untouched. Rebuild just that object and relink the kernel afterward.
+# Plasma bring-up extends only the generated Bash ABI unit for now. Normal
+# Bash/driver builds remain untouched. The transforms add read-only rootfs FDs,
+# then real single-process execve() for ET_DYN + PT_INTERP so Bash can replace
+# itself with Alpine/musl before fork/clone scheduling exists.
 BASH_COMPAT_C="$BUILD_DIR/generated/linux/bash-shell-compat.c"
 BASH_COMPAT_O="$BUILD_DIR/obj/generated/linux/bash-shell-compat.o"
 "$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-bash-compat.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/add-plasma-execve.py "$BASH_COMPAT_C"
 rm -f "$BASH_COMPAT_O" "$BUILD_DIR/twilight.elf"
 make BUILD_DIR="$BUILD_DIR" \
     LINUX_USER_SELF_TEST=0 \
@@ -83,8 +85,9 @@ if [ "$ROOTFS_KIND" = "alpine" ]; then
     echo "  [linux] Plasma ELF gate: /bin/busybox ..."
     echo "  [linux] Plasma ELF gate: PT_INTERP=..."
     echo "  [linux] Plasma ELF gate PASS: loader=..."
+    echo "After the nox# prompt, run: exec /bin/busybox sh -i"
+    echo "A successful image replacement prints: [linux:plasma] execve switched image ... through musl"
 fi
-echo "After Bash starts, rootfs files remain available through Linux file syscalls."
 echo ""
 
 # Plasma itself will need substantially more than 512 MiB. Supplying a second
