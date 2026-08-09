@@ -71,18 +71,51 @@ def write_entry_header(out, ino: int, name: str, mode: int, size: int) -> None:
 
 
 def extract_trusted_tar(archive: pathlib.Path, destination: pathlib.Path) -> None:
+    """Extract a Linux rootfs on macOS without requiring root privileges.
+
+    apko can place Linux device nodes/FIFOs in its minirootfs layer.  Creating
+    those with mknod(2) on macOS as an ordinary user fails with EPERM. Twilight
+    supplies its own virtual /dev ABI, so those host-side special nodes are not
+    useful to the generated CPIO and can safely be omitted here.
+
+    The callback deliberately does *not* use tarfile.data_filter: Alpine uses
+    valid absolute BusyBox symlinks (for example /usr/bin/yes -> /bin/busybox),
+    and Python 3.14's data filter rejects those.  This tarball was just produced
+    locally by apko from the configured Alpine repositories.
+    """
     if destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
+
+    skipped_special: list[str] = []
+
+    def rootfs_filter(member: tarfile.TarInfo, _destination: str) -> tarfile.TarInfo | None:
+        if member.isdev():
+            skipped_special.append(member.name)
+            return None
+        return member
+
     with tarfile.open(archive, "r:*") as tf:
-        # apko just produced this archive locally from the configured Alpine
-        # repositories.  Alpine deliberately contains absolute BusyBox links
-        # such as /usr/bin/yes -> /bin/busybox, so Python 3.14's default data
-        # filter is too restrictive for this known rootfs archive.
         try:
-            tf.extractall(destination, filter="fully_trusted")
+            tf.extractall(destination, filter=rootfs_filter)
         except TypeError:
-            tf.extractall(destination)
+            # Python versions predating extraction filters already allow the
+            # Alpine absolute symlinks.  Filter the member list ourselves.
+            members = []
+            for member in tf.getmembers():
+                if member.isdev():
+                    skipped_special.append(member.name)
+                    continue
+                members.append(member)
+            tf.extractall(destination, members=members)
+
+    if skipped_special:
+        preview = ", ".join(skipped_special[:8])
+        if len(skipped_special) > 8:
+            preview += f", ... (+{len(skipped_special) - 8} more)"
+        print(
+            f"Skipped {len(skipped_special)} Linux device/FIFO entries that macOS cannot create: {preview}"
+        )
 
 
 def write_apko_config(path: pathlib.Path) -> None:
