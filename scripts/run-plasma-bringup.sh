@@ -6,6 +6,7 @@ ISO_ROOT="$BUILD_DIR/iso_root"
 ISO="$BUILD_DIR/nox-plasma.iso"
 ROOTFS="$BUILD_DIR/plasma-rootfs.cpio"
 ROOTFS_KIND="${PLASMA_ROOTFS:-plasma-x11}"
+REUSE_ROOTFS="${PLASMA_REUSE_ROOTFS:-0}"
 PYTHON="${PYTHON:-python3}"
 LIMINE="${LIMINE:-limine}"
 QEMU="${QEMU:-qemu-system-x86_64}"
@@ -36,6 +37,7 @@ make BUILD_DIR="$BUILD_DIR" \
 # cooperative multi-process scheduling. Normal Nox builds remain unchanged.
 "$PYTHON" scripts/add-rootfs-to-bash-compat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-bash-compat.py "$BASH_COMPAT_C"
+"$PYTHON" scripts/finalize-plasma-rootfs-stat.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-getdents.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-file-mmap.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/add-plasma-runtime-ipc.py "$BASH_COMPAT_C"
@@ -57,29 +59,33 @@ make BUILD_DIR="$BUILD_DIR" \
     BASH_SHELL=1 \
     twilight
 
-case "$ROOTFS_KIND" in
-    tiny)
-        echo "Plasma rootfs mode: tiny CPIO protocol sanity test"
-        "$PYTHON" scripts/make-plasma-rootfs.py "$ROOTFS"
-        ;;
-    alpine)
-        echo "Plasma rootfs mode: Alpine 3.24.1 x86_64 diagnostic minirootfs"
-        "$PYTHON" scripts/fetch-alpine-plasma-base.py "$ROOTFS"
-        ;;
-    plasma-x11)
-        echo "Plasma rootfs mode: Alpine 3.21.7 + Plasma 6.2 + Xorg fbdev"
-        if [ "$(uname -s)" = "Darwin" ]; then
-            echo "macOS rootfs backend: native apko (no Docker daemon required)"
-            "$PYTHON" scripts/run-plasma-apko-macos.py "$ROOTFS"
-        else
-            "$PYTHON" scripts/fetch-alpine-plasma-x11.py "$ROOTFS"
-        fi
-        ;;
-    *)
-        echo "error: PLASMA_ROOTFS must be 'tiny', 'alpine', or 'plasma-x11'" >&2
-        exit 2
-        ;;
-esac
+if [ "$REUSE_ROOTFS" = "1" ] && [ -s "$ROOTFS" ]; then
+    echo "Reusing existing Plasma rootfs: $ROOTFS"
+else
+    case "$ROOTFS_KIND" in
+        tiny)
+            echo "Plasma rootfs mode: tiny CPIO protocol sanity test"
+            "$PYTHON" scripts/make-plasma-rootfs.py "$ROOTFS"
+            ;;
+        alpine)
+            echo "Plasma rootfs mode: Alpine 3.24.1 x86_64 diagnostic minirootfs"
+            "$PYTHON" scripts/fetch-alpine-plasma-base.py "$ROOTFS"
+            ;;
+        plasma-x11)
+            echo "Plasma rootfs mode: Alpine 3.21.7 + Plasma 6.2 + Xorg fbdev"
+            if [ "$(uname -s)" = "Darwin" ]; then
+                echo "macOS rootfs backend: native apko (no Docker daemon required)"
+                "$PYTHON" scripts/run-plasma-apko-macos.py "$ROOTFS"
+            else
+                "$PYTHON" scripts/fetch-alpine-plasma-x11.py "$ROOTFS"
+            fi
+            ;;
+        *)
+            echo "error: PLASMA_ROOTFS must be 'tiny', 'alpine', or 'plasma-x11'" >&2
+            exit 2
+            ;;
+    esac
+fi
 
 rm -rf "$ISO_ROOT"
 mkdir -p "$ISO_ROOT/boot/limine" "$ISO_ROOT/EFI/BOOT"
@@ -123,5 +129,8 @@ if [ "$ROOTFS_KIND" = "plasma-x11" ]; then
 fi
 echo ""
 
-QEMU="$QEMU" QEMU_EXTRA_ARGS="-m 3072M ${QEMU_EXTRA_ARGS:-}" \
+# The Plasma CPIO itself is ~1.7 GiB. Give the guest enough headroom for the
+# boot module plus Xorg/Qt/Plasma runtime allocations while remaining sensible
+# on a 16 GiB development host.
+QEMU="$QEMU" QEMU_EXTRA_ARGS="-m 6144M ${QEMU_EXTRA_ARGS:-}" \
     sh scripts/run-qemu.sh "$MODE" pc "$ISO"
