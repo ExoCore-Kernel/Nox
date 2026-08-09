@@ -7,6 +7,9 @@
 #define CPIO_NEWC_HEADER_SIZE 110u
 #define CPIO_MODE_TYPE_MASK   0170000u
 #define CPIO_MODE_DIRECTORY   0040000u
+#define CPIO_MODE_SYMLINK     0120000u
+#define ROOTFS_PATH_MAX       512u
+#define ROOTFS_SYMLINK_MAX    12u
 
 static const uint8_t *rootfs_archive;
 static size_t rootfs_archive_size;
@@ -185,6 +188,102 @@ bool rootfs_lookup(const char *path, struct rootfs_node *out) {
             return true;
         }
         offset = entry.next_offset;
+    }
+    return false;
+}
+
+static bool normalize_path(const char *input, char out[ROOTFS_PATH_MAX]) {
+    if (input == 0 || out == 0) return false;
+
+    size_t out_len = 0;
+    size_t component_start[64];
+    size_t depth = 0;
+    const char *p = input;
+
+    while (*p == '/') ++p;
+    while (*p != '\0') {
+        while (*p == '/') ++p;
+        if (*p == '\0') break;
+
+        const char *start = p;
+        while (*p != '\0' && *p != '/') ++p;
+        const size_t len = (size_t)(p - start);
+
+        if (len == 1u && start[0] == '.') continue;
+        if (len == 2u && start[0] == '.' && start[1] == '.') {
+            if (depth != 0) {
+                out_len = component_start[--depth];
+                if (out_len != 0 && out[out_len - 1u] == '/') --out_len;
+            }
+            continue;
+        }
+
+        if (depth >= sizeof(component_start) / sizeof(component_start[0])) return false;
+        if (out_len != 0) {
+            if (out_len + 1u >= ROOTFS_PATH_MAX) return false;
+            out[out_len++] = '/';
+        }
+        component_start[depth++] = out_len;
+        if (len >= ROOTFS_PATH_MAX - out_len) return false;
+        for (size_t i = 0; i < len; ++i) out[out_len++] = start[i];
+    }
+
+    if (out_len == 0) {
+        out[0] = '.';
+        out[1] = '\0';
+    } else {
+        out[out_len] = '\0';
+    }
+    return true;
+}
+
+bool rootfs_lookup_follow(const char *path, struct rootfs_node *out) {
+    if (!rootfs_ready || path == 0 || out == 0) return false;
+
+    char current[ROOTFS_PATH_MAX];
+    if (!normalize_path(path, current)) return false;
+
+    for (unsigned depth = 0; depth < ROOTFS_SYMLINK_MAX; ++depth) {
+        struct rootfs_node node;
+        if (!rootfs_lookup(current, &node)) return false;
+        if ((node.mode & CPIO_MODE_TYPE_MASK) != CPIO_MODE_SYMLINK) {
+            *out = node;
+            return true;
+        }
+        if (node.size == 0 || node.size >= ROOTFS_PATH_MAX) return false;
+
+        char target[ROOTFS_PATH_MAX];
+        for (size_t i = 0; i < node.size; ++i) target[i] = (char)node.data[i];
+        target[node.size] = '\0';
+
+        char combined[ROOTFS_PATH_MAX];
+        if (target[0] == '/') {
+            if (!normalize_path(target, combined)) return false;
+        } else {
+            size_t slash = 0;
+            size_t current_len = 0;
+            while (current[current_len] != '\0') {
+                if (current[current_len] == '/') slash = current_len + 1u;
+                ++current_len;
+            }
+            if (slash + node.size + 1u >= ROOTFS_PATH_MAX) return false;
+            size_t n = 0;
+            for (; n < slash; ++n) combined[n] = current[n];
+            for (size_t i = 0; i < node.size; ++i) combined[n++] = target[i];
+            combined[n] = '\0';
+            char normalized[ROOTFS_PATH_MAX];
+            if (!normalize_path(combined, normalized)) return false;
+            n = 0;
+            do {
+                current[n] = normalized[n];
+            } while (normalized[n++] != '\0');
+            continue;
+        }
+
+        size_t n = 0;
+        do {
+            current[n] = combined[n];
+        } while (combined[n++] != '\0');
     }
     return false;
 }
