@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Add the small writable-VFS and credential syscalls Xorg needs for bring-up.
-
-Xorg creates a temporary file in /tmp, adjusts its mode, then link(2)s it to
-/tmp/.X0-lock as an atomic claim.  Twilight's bring-up VFS stores file payloads
-inline rather than as shared inode objects, so link() duplicates the runtime
-node's metadata/data under the destination name.  Xorg immediately unlinks the
-temporary source after a successful claim, making that equivalent for this
-bring-up path while keeping the implementation simple.
-
-The XKB helper launch path also drops/restores credentials before execing
-xkbcomp.  Bring-up userspace currently has a single root credential model, so
-the Linux set*id calls are accepted as successful no-ops.  This is deliberately
-limited to the Plasma compatibility layer; a real credential model can replace
-it later without affecting the native Twilight kernel API.
-"""
+"""Add the small writable-VFS, credential, and helper syscalls Xorg needs."""
 from __future__ import annotations
 
 import pathlib
@@ -34,6 +20,11 @@ def main() -> int:
     path = pathlib.Path(sys.argv[1])
     text = path.read_text(encoding="utf-8")
 
+    text = rep(
+        text,
+        "#define SYS_WRITEV          20ull\n",
+        "#define SYS_READV           19ull\n#define SYS_WRITEV          20ull\n",
+    )
     text = rep(
         text,
         "#define SYS_CHDIR           80ull\n",
@@ -121,6 +112,28 @@ static int64_t plasma_runtime_link(uint64_t old_address, uint64_t new_address) {
 '''
     text = rep(text, helper_anchor, helpers + helper_anchor)
 
+    # xkbcomp uses readv(2) on stdin. Feed every iovec through the existing
+    # read path so pipes/runtime FDs keep exactly the same semantics as read(2).
+    read_anchor = "    case SYS_WRITE:\n"
+    readv_dispatch = r'''    case SYS_READV: {
+        if (a3 > 64 || !user_range(a2, a3 * sizeof(struct linux_iovec), false))
+            return -LINUX_EFAULT;
+        int64_t total = 0;
+        for (uint64_t i = 0; i < a3; ++i) {
+            struct linux_iovec iov;
+            if (!user_copy_in(&iov, a2 + i * sizeof(iov), sizeof(iov)))
+                return total != 0 ? total : -LINUX_EFAULT;
+            if (iov.len == 0) continue;
+            const int64_t rc = shell_dispatch(SYS_READ, a1, iov.base, iov.len, 0, 0, 0);
+            if (rc < 0) return total != 0 ? total : rc;
+            total += rc;
+            if ((uint64_t)rc < iov.len) break;
+        }
+        return total;
+    }
+'''
+    text = rep(text, read_anchor, readv_dispatch + read_anchor)
+
     dispatch_anchor = "    case SYS_GETCWD: {\n"
     dispatch = r'''    case SYS_LINK:
         return plasma_runtime_link(a1, a2);
@@ -129,11 +142,6 @@ static int64_t plasma_runtime_link(uint64_t old_address, uint64_t new_address) {
 '''
     text = rep(text, dispatch_anchor, dispatch + dispatch_anchor)
 
-    # Xorg's helper-launch path normalizes uid/gid before execing xkbcomp.
-    # Twilight's Plasma ABI is root-only during bring-up, so accepting the
-    # credential setters is equivalent to Linux set*id(0) for this environment.
-    # Include the related variants now so libc cannot fall through to the next
-    # unsupported setxid syscall after setgid(2) succeeds.
     credential_anchor = (
         "    case SYS_GETUID:\n"
         "    case SYS_GETGID:\n"
@@ -151,9 +159,6 @@ static int64_t plasma_runtime_link(uint64_t old_address, uint64_t new_address) {
     )
     text = rep(text, credential_anchor, credential_dispatch)
 
-    # Bash/musl probes these while establishing credentials. Twilight's
-    # bring-up userspace runs as uid/gid 0, so Linux semantics are simply to
-    # return the previous fsuid/fsgid, also 0.
     text = rep(
         text,
         "    case SYS_GETSID: return 1;\n",
@@ -163,7 +168,7 @@ static int64_t plasma_runtime_link(uint64_t old_address, uint64_t new_address) {
     )
 
     path.write_text(text, encoding="utf-8")
-    print(f"Finalized Xorg /tmp lock + root credential ABI: {path}")
+    print(f"Finalized Xorg /tmp lock + root credential + readv ABI: {path}")
     return 0
 
 
