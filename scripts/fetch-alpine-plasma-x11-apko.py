@@ -38,8 +38,7 @@ PLASMA_PACKAGES = [
     "plasma-workspace-x11",
     "xorg-server",
     "xf86-video-fbdev",
-    "xf86-input-mouse",
-    "xf86-input-keyboard",
+    "xf86-input-libinput",
     "xinit",
     "dbus",
 ]
@@ -75,15 +74,10 @@ def write_entry_header(out, ino: int, name: str, mode: int, size: int) -> None:
 def extract_trusted_tar(archive: pathlib.Path, destination: pathlib.Path) -> None:
     """Extract a Linux rootfs on macOS without requiring root privileges.
 
-    apko can place Linux device nodes/FIFOs in its minirootfs layer.  Creating
+    apko can place Linux device nodes/FIFOs in its minirootfs layer. Creating
     those with mknod(2) on macOS as an ordinary user fails with EPERM. Twilight
     supplies its own virtual /dev ABI, so those host-side special nodes are not
     useful to the generated CPIO and can safely be omitted here.
-
-    The callback deliberately does *not* use tarfile.data_filter: Alpine uses
-    valid absolute BusyBox symlinks (for example /usr/bin/yes -> /bin/busybox),
-    and Python 3.14's data filter rejects those.  This tarball was just produced
-    locally by apko from the configured Alpine repositories.
     """
     if destination.exists():
         shutil.rmtree(destination)
@@ -194,6 +188,8 @@ def write_nox_configuration(root: pathlib.Path) -> None:
         '''EndSection\n\n'''
         '''Section "ServerFlags"\n'''
         '''    Option "AutoAddDevices" "false"\n'''
+        '''    Option "AutoEnableDevices" "false"\n'''
+        '''    Option "AllowEmptyInput" "true"\n'''
         '''    Option "AutoAddGPU" "false"\n'''
         '''    Option "AutoBindGPU" "false"\n'''
         '''EndSection\n''',
@@ -228,12 +224,13 @@ def verify_rootfs(root: pathlib.Path) -> None:
         "usr/bin/dbus-run-session",
         "usr/lib/xorg/modules/drivers/fbdev_drv.so",
         "usr/lib/xorg/modules/libfbdevhw.so",
+        "usr/lib/xorg/modules/input/libinput_drv.so",
         "etc/X11/xorg.conf.d/20-twilight-fbdev.conf",
     ]
     missing = [entry for entry in required if not os.path.lexists(root / entry)]
     if missing:
         raise RuntimeError("apko rootfs is missing required GUI files: " + ", ".join(missing))
-    print("apko rootfs sanity check PASS: BusyBox + musl + Xorg + fbdev + Plasma X11 + D-Bus")
+    print("apko rootfs sanity check PASS: BusyBox + musl + Xorg + fbdev + libinput + Plasma X11 + D-Bus")
 
 
 def normalized_rel(path: pathlib.Path, root: pathlib.Path) -> str:
