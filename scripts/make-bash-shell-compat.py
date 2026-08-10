@@ -27,6 +27,16 @@ def main() -> int:
     output = pathlib.Path(sys.argv[2])
     text = source.read_text(encoding="utf-8")
 
+    # The common early IPC layer owns AF_UNIX sockets, pipe descriptors and
+    # socket-aware poll/fcntl semantics. The generated Bash router asks it first
+    # and falls through to the existing terminal/filesystem shim when a syscall
+    # is unrelated to IPC.
+    text = require_replace(
+        text,
+        '#include <twilight/tty.h>\n',
+        '#include <twilight/tty.h>\n#include <twilight/linux_ipc.h>\n',
+    )
+
     # Process identity: this is genuinely Bash invoked as /bin/bash -i.
     text = require_replace(text, 'const char argv0[] = "/bin/sh";',
                            'const char argv0[] = "/bin/bash";')
@@ -73,10 +83,9 @@ def main() -> int:
         '        return 0;\n',
     )
 
-    # Bash/glibc probes sockets during startup. Userspace sockets are not wired
-    # to Twilight networking yet, so report the precise Linux condition rather
-    # than an unknown syscall. Real socket support comes with the driver-backed
-    # networking milestone.
+    # Keep the old socket fallback for non-IPC builds. In the generated Bash
+    # build twilight_linux_ipc_syscall() runs before this switch and handles
+    # socket(2), including precise EAFNOSUPPORT for non-AF_UNIX domains.
     text = require_replace(
         text,
         '    case SYS_MADVISE: return 0;\n',
@@ -226,6 +235,26 @@ static int64_t bash_select_tty(uint64_t nfds,
                            'static int64_t shell_dispatch(uint64_t number,\n',
                            select_helpers + 'static int64_t shell_dispatch(uint64_t number,\n')
 
+    # Route IPC descriptors before the legacy single-TTY switch. The IPC hook
+    # deliberately reports handled=false for unrelated syscalls, so all of the
+    # existing Bash bring-up behavior remains intact.
+    dispatch_head = '''static int64_t shell_dispatch(uint64_t number,
+                              uint64_t a1, uint64_t a2, uint64_t a3,
+                              uint64_t a4, uint64_t a5, uint64_t a6) {
+    switch (number) {
+'''
+    dispatch_with_ipc = '''static int64_t shell_dispatch(uint64_t number,
+                              uint64_t a1, uint64_t a2, uint64_t a3,
+                              uint64_t a4, uint64_t a5, uint64_t a6) {
+    bool ipc_handled = false;
+    const int64_t ipc_result = twilight_linux_ipc_syscall(
+        number, a1, a2, a3, a4, a5, a6, &ipc_handled);
+    if (ipc_handled) return ipc_result;
+
+    switch (number) {
+'''
+    text = require_replace(text, dispatch_head, dispatch_with_ipc)
+
     old_select = '''    case SYS_SELECT:
     case SYS_PSELECT6:
         /* BusyBox's line editor can use poll/read on this terminal. Returning
@@ -242,9 +271,8 @@ static int64_t bash_select_tty(uint64_t nfds,
 '''
     text = require_replace(text, old_select, new_select)
 
-    # Trace the true process-exit boundary. If a later run prints this before a
-    # crash, the fault is in Twilight's unwind path; if it never prints, Bash
-    # faulted during userspace exit handlers before invoking exit/exit_group.
+    # Trace the true process-exit boundary. The IPC hook has already released
+    # its descriptor table before control reaches this switch case.
     text = require_replace(
         text,
         '    case SYS_EXIT:\n'
