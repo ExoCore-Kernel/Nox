@@ -86,6 +86,10 @@ make BUILD_DIR="$BUILD_DIR" \
 # thread group is torn down before the existing process-zombie path reclaims
 # pipes/eventfds and wakes wait4 parents.
 "$PYTHON" scripts/finalize-plasma-exit-group.py "$BASH_COMPAT_C"
+# AF_UNIX peer credentials are required by D-Bus EXTERNAL authentication.
+# Apply this after thread/resource semantics so socket lifetime scans understand
+# CLONE_FILES and whole-thread-group exit correctly.
+"$PYTHON" scripts/finalize-plasma-unix-sockets.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-generated-c.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-autoboot.py "$BASH_COMPAT_C"
 if [ "$PLASMA_TRACE" = "1" ]; then
