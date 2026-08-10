@@ -6,6 +6,9 @@ clear_child_tid store and process->exit_status.  The first pthread finalizer
 matched the older contiguous process-exit fragment.  Intercept only that one
 replacement and hook the thread-exit path immediately after plasma_save_active;
 all other pthread transformations still come from finalize-plasma-threads.py.
+
+After pthread generation succeeds, apply the PIT-backed futex progress pass so
+Qt timed waits cannot become permanent cooperative-scheduler deadlocks.
 """
 from __future__ import annotations
 
@@ -14,13 +17,18 @@ import pathlib
 import sys
 
 
-def main() -> int:
-    implementation = pathlib.Path(__file__).with_name("finalize-plasma-threads.py")
-    spec = importlib.util.spec_from_file_location("plasma_threads_impl", implementation)
+def load_module(path: pathlib.Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise RuntimeError("could not load pthread finalizer implementation")
+        raise RuntimeError(f"could not load finalizer implementation: {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def main() -> int:
+    implementation = pathlib.Path(__file__).with_name("finalize-plasma-threads.py")
+    module = load_module(implementation, "plasma_threads_impl")
 
     original_rep = module.rep
 
@@ -57,7 +65,15 @@ def main() -> int:
         return original_rep(text, old, new, count)
 
     module.rep = compatible_rep
-    return int(module.main())
+    rc = int(module.main())
+    if rc != 0:
+        return rc
+
+    futex_progress = load_module(
+        pathlib.Path(__file__).with_name("finalize-plasma-futex-progress.py"),
+        "plasma_futex_progress_impl",
+    )
+    return int(futex_progress.main())
 
 
 if __name__ == "__main__":
