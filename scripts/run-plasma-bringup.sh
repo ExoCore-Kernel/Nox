@@ -82,6 +82,10 @@ make BUILD_DIR="$BUILD_DIR" \
 # group instead of treating each scheduler slot as a separate open-file table.
 "$PYTHON" scripts/finalize-plasma-pipe-lifetime.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-eventfd.py "$BASH_COMPAT_C"
+# exit_group is applied after all shared-resource lifetime hooks so a whole
+# thread group is torn down before the existing process-zombie path reclaims
+# pipes/eventfds and wakes wait4 parents.
+"$PYTHON" scripts/finalize-plasma-exit-group.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-generated-c.py "$BASH_COMPAT_C"
 "$PYTHON" scripts/finalize-plasma-autoboot.py "$BASH_COMPAT_C"
 if [ "$PLASMA_TRACE" = "1" ]; then
